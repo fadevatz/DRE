@@ -48,3 +48,4 @@ EXPOSE 3001
 
 # Comando de inicialização
 CMD ["node", "server/index.js"]
+

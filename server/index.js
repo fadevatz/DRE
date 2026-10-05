@@ -5,6 +5,7 @@ const path = require('path');
 const { getPool, getStatus, getConfig, saveConfig, testConnection } = require('./db');
 const { planocontasMock, pagarMock, filiaisMock } = require('./mockData');
 const { DRE_STRUCTURE, classifyAccount } = require('./dreClassifier');
+const { getFiscalRevenueAndCmv } = require('./revenueService');
 
 // Regra de Negócio: filial_id 1 - Escritorio vê informações de todas as lojas
 function shouldFilterByFilial(filialId) {
@@ -169,6 +170,17 @@ app.get('/api/kpis', async (req, res) => {
       const [rows] = await pool.query(sql, params);
       const data = rows[0] || {};
 
+      let fiscalData = null;
+      try {
+        fiscalData = await getFiscalRevenueAndCmv(pool, {
+          filialId: filial_id,
+          dtInicio: dt_inicio,
+          dtFim: dt_fim
+        });
+      } catch (errFiscal) {
+        console.warn('Erro ao obter dados fiscais para KPIs:', errFiscal.message);
+      }
+
       const totalTitulos = Number(data.total_titulos || 0);
       const totalValor = Number(regime === 'caixa' ? data.total_pago : data.total_valor || 0);
       const totalPago = Number(data.total_pago || 0);
@@ -180,15 +192,24 @@ app.get('/api/kpis', async (req, res) => {
       const totalVencido = Number(data.total_vencido || 0);
       const totalAVencer = Number(data.total_a_vencer || 0);
 
-      const ticketMedio = totalTitulos > 0 ? totalValor / totalTitulos : 0;
+      const faturamentoBruto = fiscalData ? fiscalData.totalReceitaBruta : 0;
+      const receitaLiquida = fiscalData ? fiscalData.totalReceitaLiquida : 0;
+      const cmvTotal = fiscalData ? fiscalData.totalCmv : 0;
+      const resultadoBruto = fiscalData ? fiscalData.totalResultadoBruto : 0;
+
+      const ticketMedio = totalTitulos > 0 ? (faturamentoBruto > 0 ? faturamentoBruto / totalTitulos : totalValor / totalTitulos) : 0;
       const pctPago = totalValor > 0 ? (totalPago / totalValor) * 100 : 0;
 
       return res.json({
         totalGeral: {
-          valor: totalValor,
+          valor: faturamentoBruto > 0 ? faturamentoBruto : totalValor,
+          isReceitaBruta: faturamentoBruto > 0,
           qtd: totalTitulos,
           ticketMedio,
-          totalDoc: Number(data.total_valor || 0)
+          totalDoc: Number(data.total_valor || 0),
+          receitaLiquida,
+          resultadoBruto,
+          cmvTotal
         },
         pagos: {
           valor: totalPago,
@@ -277,7 +298,7 @@ app.get('/api/kpis', async (req, res) => {
   }
 });
 
-function generateStructuredDre(rawRows, regime) {
+function generateStructuredDre(rawRows, regime, fiscalData = null) {
   // Inicializar seções analíticas baseadas no DRE_STRUCTURE
   const sectionBuckets = {};
   DRE_STRUCTURE.filter(s => !s.isSubtotal).forEach(s => {
@@ -318,6 +339,48 @@ function generateStructuredDre(rawRows, regime) {
       bucket.contasMap[codeKey].qtd_lancamentos += qtd;
     }
   });
+
+  // Integrar dados fiscais de movimentação (Receita Bruta, Deduções e CMV)
+  if (fiscalData) {
+    if (fiscalData.itensReceita && fiscalData.itensReceita.length > 0) {
+      fiscalData.itensReceita.forEach(item => {
+        sectionBuckets['1'].total += item.total_valor;
+        sectionBuckets['1'].qtdLancamentos += item.qtd_lancamentos;
+        sectionBuckets['1'].contasMap[item.descricao] = {
+          codigo: item.codigo,
+          descricao: item.descricao,
+          total_valor: item.total_valor,
+          qtd_lancamentos: item.qtd_lancamentos
+        };
+      });
+    }
+
+    if (fiscalData.itensDeducoes && fiscalData.itensDeducoes.length > 0) {
+      fiscalData.itensDeducoes.forEach(item => {
+        sectionBuckets['2'].total += item.total_valor;
+        sectionBuckets['2'].qtdLancamentos += item.qtd_lancamentos;
+        sectionBuckets['2'].contasMap[item.descricao] = {
+          codigo: item.codigo,
+          descricao: item.descricao,
+          total_valor: item.total_valor,
+          qtd_lancamentos: item.qtd_lancamentos
+        };
+      });
+    }
+
+    if (fiscalData.itensCmv && fiscalData.itensCmv.length > 0) {
+      fiscalData.itensCmv.forEach(item => {
+        sectionBuckets['3'].total += item.total_valor;
+        sectionBuckets['3'].qtdLancamentos += item.qtd_lancamentos;
+        sectionBuckets['3'].contasMap[item.descricao] = {
+          codigo: item.codigo,
+          descricao: item.descricao,
+          total_valor: item.total_valor,
+          qtd_lancamentos: item.qtd_lancamentos
+        };
+      });
+    }
+  }
 
   // Totais das seções analíticas
   const s1 = sectionBuckets['1']?.total || 0;
@@ -462,8 +525,21 @@ app.get('/api/dre', async (req, res) => {
         ORDER BY pc.codigo ASC
       `;
 
+      // 1. Consultar dados fiscais de Receita Bruta, Deduções e CMV das movimentações
+      let fiscalData = null;
+      try {
+        fiscalData = await getFiscalRevenueAndCmv(pool, {
+          filialId: filial_id,
+          dtInicio: dt_inicio,
+          dtFim: dt_fim
+        });
+      } catch (errFiscal) {
+        console.warn('Falha ao calcular dados fiscais:', errFiscal.message);
+      }
+
+      // 2. Consultar despesas da tabela pagar
       const [rows] = await pool.query(sql, params);
-      const dreResult = generateStructuredDre(rows, regime);
+      const dreResult = generateStructuredDre(rows, regime, fiscalData);
       return res.json(dreResult);
     }
 

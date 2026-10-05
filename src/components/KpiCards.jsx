@@ -21,7 +21,7 @@ export default function KpiCards({ kpis, regime }) {
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      {/* CARD 1: TOTAL DE DESPESAS (Borda Azul Superior) */}
+      {/* CARD 1: RECEITA BRUTA / TOTAL DE DESPESAS (Borda Azul Superior) */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs relative overflow-hidden flex flex-col justify-between p-5 pt-4">
         <div className="absolute top-0 left-0 right-0 h-1 bg-blue-600"></div>
 
@@ -31,7 +31,9 @@ export default function KpiCards({ kpis, regime }) {
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-blue-600" />
               <span className="text-xs font-semibold text-slate-600">
-                {regime === 'caixa' ? 'Total Desembolsado (Caixa)' : 'Total de Despesas (DRE)'}
+                {totalGeral.isReceitaBruta
+                  ? 'Faturamento Bruto (Receita)'
+                  : (regime === 'caixa' ? 'Total Desembolsado (Caixa)' : 'Total de Despesas (DRE)')}
               </span>
             </div>
             <span className="text-[11px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
@@ -47,20 +49,39 @@ export default function KpiCards({ kpis, regime }) {
 
         {/* Linhas de Detalhe Inferiores */}
         <div className="space-y-1.5 pt-3 border-t border-slate-100 text-xs">
-          <div className="flex justify-between items-center text-slate-500">
-            <span>Valor em Documentos:</span>
-            <span className="font-semibold text-slate-700">{formatMoney(totalGeral.totalDoc)}</span>
-          </div>
-          <div className="flex justify-between items-center text-slate-500">
-            <span>Descontos Obtidos:</span>
-            <span className="font-semibold text-emerald-600">
-              {totalGeral.valor > 0 && pagos.descontos > 0 ? `- ${formatMoney(pagos.descontos)}` : 'R$ 0,00'}
-            </span>
-          </div>
-          <div className="flex justify-between items-center text-slate-500">
-            <span>Ticket Médio:</span>
-            <span className="font-semibold text-slate-700">{formatMoney(totalGeral.ticketMedio)}</span>
-          </div>
+          {totalGeral.isReceitaBruta ? (
+            <>
+              <div className="flex justify-between items-center text-slate-500">
+                <span>Receita Líquida:</span>
+                <span className="font-semibold text-slate-700">{formatMoney(totalGeral.receitaLiquida)}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-500">
+                <span>Resultado Bruto:</span>
+                <span className="font-semibold text-emerald-600">{formatMoney(totalGeral.resultadoBruto)}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-500">
+                <span>CMV (Custo Mercadorias):</span>
+                <span className="font-semibold text-rose-600">- {formatMoney(totalGeral.cmvTotal)}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-between items-center text-slate-500">
+                <span>Valor em Documentos:</span>
+                <span className="font-semibold text-slate-700">{formatMoney(totalGeral.totalDoc)}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-500">
+                <span>Descontos Obtidos:</span>
+                <span className="font-semibold text-emerald-600">
+                  {totalGeral.valor > 0 && pagos.descontos > 0 ? `- ${formatMoney(pagos.descontos)}` : 'R$ 0,00'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-500">
+                <span>Ticket Médio:</span>
+                <span className="font-semibold text-slate-700">{formatMoney(totalGeral.ticketMedio)}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
