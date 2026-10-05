@@ -21,6 +21,15 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Anti-cache e logs para todas as chamadas da API
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  console.log(`[API ${new Date().toLocaleTimeString('pt-BR')}] ${req.method} ${req.url}`);
+  next();
+});
+
 // Helper para tratar datas em string YYYY-MM-DD
 function parseDateParam(dateStr, defaultStr) {
   if (!dateStr || dateStr.trim() === '') return defaultStr;
@@ -129,23 +138,23 @@ app.get('/api/kpis', async (req, res) => {
       // Filtro de Período e Regime
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
-        if (dt_inicio) {
-          whereClauses.push('p.dt_pgto >= ?');
-          params.push(dt_inicio);
+        if (dt_inicio && dt_inicio.trim() !== '') {
+          whereClauses.push('DATE(p.dt_pgto) >= ?');
+          params.push(dt_inicio.trim().split('T')[0]);
         }
-        if (dt_fim) {
-          whereClauses.push('p.dt_pgto <= ?');
-          params.push(dt_fim);
+        if (dt_fim && dt_fim.trim() !== '') {
+          whereClauses.push('DATE(p.dt_pgto) <= ?');
+          params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
         // Competência
-        if (dt_inicio) {
-          whereClauses.push('COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro) >= ?');
-          params.push(dt_inicio);
+        if (dt_inicio && dt_inicio.trim() !== '') {
+          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
+          params.push(dt_inicio.trim().split('T')[0]);
         }
-        if (dt_fim) {
-          whereClauses.push('COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro) <= ?');
-          params.push(dt_fim);
+        if (dt_fim && dt_fim.trim() !== '') {
+          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
+          params.push(dt_fim.trim().split('T')[0]);
         }
       }
 
@@ -480,22 +489,22 @@ app.get('/api/dre', async (req, res) => {
 
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
-        if (dt_inicio) {
-          whereClauses.push('p.dt_pgto >= ?');
-          params.push(dt_inicio);
+        if (dt_inicio && dt_inicio.trim() !== '') {
+          whereClauses.push('DATE(p.dt_pgto) >= ?');
+          params.push(dt_inicio.trim().split('T')[0]);
         }
-        if (dt_fim) {
-          whereClauses.push('p.dt_pgto <= ?');
-          params.push(dt_fim);
+        if (dt_fim && dt_fim.trim() !== '') {
+          whereClauses.push('DATE(p.dt_pgto) <= ?');
+          params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
-        if (dt_inicio) {
-          whereClauses.push('COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro) >= ?');
-          params.push(dt_inicio);
+        if (dt_inicio && dt_inicio.trim() !== '') {
+          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
+          params.push(dt_inicio.trim().split('T')[0]);
         }
-        if (dt_fim) {
-          whereClauses.push('COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro) <= ?');
-          params.push(dt_fim);
+        if (dt_fim && dt_fim.trim() !== '') {
+          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
+          params.push(dt_fim.trim().split('T')[0]);
         }
       }
 
@@ -617,20 +626,20 @@ app.get('/api/graficos', async (req, res) => {
         params.push(searchParam, searchParam, searchParam);
       }
 
-      const dateField = regime === 'caixa' ? 'p.dt_pgto' : 'COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)';
+      const dateField = regime === 'caixa' ? 'DATE(p.dt_pgto)' : 'DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro))';
       const valField = regime === 'caixa' ? 'p.valor_pago' : 'p.valor';
 
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
       }
 
-      if (dt_inicio) {
+      if (dt_inicio && dt_inicio.trim() !== '') {
         whereClauses.push(`${dateField} >= ?`);
-        params.push(dt_inicio);
+        params.push(dt_inicio.trim().split('T')[0]);
       }
-      if (dt_fim) {
+      if (dt_fim && dt_fim.trim() !== '') {
         whereClauses.push(`${dateField} <= ?`);
-        params.push(dt_fim);
+        params.push(dt_fim.trim().split('T')[0]);
       }
 
       const whereSql = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
@@ -737,22 +746,22 @@ app.get('/api/lancamentos', async (req, res) => {
 
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
-        if (dt_inicio) {
-          whereClauses.push('p.dt_pgto >= ?');
-          params.push(dt_inicio);
+        if (dt_inicio && dt_inicio.trim() !== '') {
+          whereClauses.push('DATE(p.dt_pgto) >= ?');
+          params.push(dt_inicio.trim().split('T')[0]);
         }
-        if (dt_fim) {
-          whereClauses.push('p.dt_pgto <= ?');
-          params.push(dt_fim);
+        if (dt_fim && dt_fim.trim() !== '') {
+          whereClauses.push('DATE(p.dt_pgto) <= ?');
+          params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
-        if (dt_inicio) {
-          whereClauses.push('COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro) >= ?');
-          params.push(dt_inicio);
+        if (dt_inicio && dt_inicio.trim() !== '') {
+          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
+          params.push(dt_inicio.trim().split('T')[0]);
         }
-        if (dt_fim) {
-          whereClauses.push('COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro) <= ?');
-          params.push(dt_fim);
+        if (dt_fim && dt_fim.trim() !== '') {
+          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
+          params.push(dt_fim.trim().split('T')[0]);
         }
       }
 
@@ -975,9 +984,16 @@ app.post('/api/database/seed', async (req, res) => {
 // Servir frontend se compilado
 const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+    }
+  }));
   app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }

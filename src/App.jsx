@@ -193,6 +193,14 @@ export default function App() {
             setBusca('');
             setPage(1);
           }}
+          onApplyFilters={loadData}
+          onSelectPeriod={(ini, fim) => {
+            setDtInicio(ini);
+            setDtFim(fim);
+            setPage(1);
+          }}
+          onResetFilters={handleResetFilters}
+          loading={loading}
         />
 
         {/* 3. 4 Cards de Métricas / KPIs (Layout Idêntico à Foto) */}
