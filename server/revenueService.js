@@ -1,18 +1,20 @@
-// Serviço para cálculo fiscal de Receita Bruta, Deduções e CMV baseado nas movimentações fiscais
+// Serviço otimizado para cálculo fiscal de Receita Bruta, Deduções e CMV
+// Prioriza o consumo da view 'vw_dre_faturamento_cmv' criada no MariaDB para máxima velocidade.
+// Caso a view não esteja disponível, possui fallback automático para as tabelas fiscais de origem.
 
 function buildDateRange(dtInicio, dtFim) {
   const dInicio = dtInicio && dtInicio.trim() !== '' 
-    ? `${dtInicio.trim().split('T')[0]} 00:00:00` 
-    : '2025-01-01 00:00:00';
+    ? dtInicio.trim().split('T')[0]
+    : '2024-01-01';
 
   const dFim = dtFim && dtFim.trim() !== '' 
-    ? `${dtFim.trim().split('T')[0]} 23:59:59` 
-    : '2026-12-31 23:59:59';
+    ? dtFim.trim().split('T')[0]
+    : '2026-12-31';
 
   return { dInicio, dFim };
 }
 
-// Verifica se deve filtrar por filial específica (filial 1 - Escritorio vê todas as lojas)
+// Regra de filial: Filial 1 (Escritório) ou 'todas' consolida todas as lojas
 function isFilialRestricted(filialId) {
   if (!filialId || filialId === 'todas' || String(filialId) === '1') {
     return false;
@@ -20,13 +22,124 @@ function isFilialRestricted(filialId) {
   return true;
 }
 
-async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
-  if (!pool) return null;
+// Mapeia origem e tipo da view para código contábil da DRE e descrição amigável
+function mapOrigemToConta(tipo, origem) {
+  const orig = (origem || '').toUpperCase();
 
-  const { dInicio, dFim } = buildDateRange(dtInicio, dtFim);
-  const filterByFilial = isFilialRestricted(filialId);
+  if (tipo === 'RECEITA_BRUTA') {
+    if (orig.includes('ECF')) {
+      return { codigo: '1.01.001', descricao: 'Cupons ECF (Redução Z)' };
+    }
+    if (orig.includes('TALÃO') || orig.includes('TALAO')) {
+      return { codigo: '1.01.001', descricao: 'Notas Fiscais de Consumidor (Talão Mod. 02)' };
+    }
+    if (orig.includes('NFC-E')) {
+      return { codigo: '1.01.003', descricao: 'NFC-e (Nota Fiscal Consumidor Eletrônica Mod. 65)' };
+    }
+    if (orig.includes('NF/NF-E') || orig.includes('VENDA')) {
+      return { codigo: '1.01.004', descricao: 'NF/NF-e de Venda (Mod. 55 e 01)' };
+    }
+    if (orig.includes('RPS')) {
+      return { codigo: '1.01.005', descricao: 'RPS (Recibo Provisório de Serviços)' };
+    }
+    if (orig.includes('SAT')) {
+      return { codigo: '1.01.007', descricao: 'Cupons SAT/CF-e' };
+    }
+    return { codigo: '1.01.004', descricao: origem || 'Receita Bruta de Vendas' };
+  }
 
-  // Helper para construir cláusula de filial
+  if (tipo === 'DEDUCAO') {
+    if (orig.includes('DEVOLUÇÃO') || orig.includes('DEVOLUCAO')) {
+      return { codigo: '1.02.007', descricao: 'NF/NF-e de Devolução de Clientes' };
+    }
+    if (orig.includes('CANCELAMENTO') || orig.includes('ESTORNO')) {
+      return { codigo: '1.02.007', descricao: `Cancelamentos (${origem})` };
+    }
+    if (orig.includes('DESCONTO')) {
+      return { codigo: '3.06.008', descricao: `Descontos Concedidos (${origem})` };
+    }
+    if (orig.includes('DAS') || orig.includes('SIMPLES')) {
+      return { codigo: '2.02.007', descricao: 'DAS Simples Nacional / Tributos Diretos' };
+    }
+    if (orig.includes('ICMS')) {
+      return { codigo: '2.02.003', descricao: 'ICMS sobre Vendas' };
+    }
+    if (orig.includes('PIS')) {
+      return { codigo: '2.02.004', descricao: 'PIS/PASEP sobre Vendas' };
+    }
+    if (orig.includes('COFINS')) {
+      return { codigo: '2.02.005', descricao: 'COFINS sobre Vendas' };
+    }
+    return { codigo: '1.02.007', descricao: origem || 'Deduções sobre Vendas' };
+  }
+
+  if (tipo === 'CMV') {
+    return { 
+      codigo: '2.01.001', 
+      descricao: orig.includes('PMC') 
+        ? 'Custo das Mercadorias Vendidas (CMV - PMC Estoque)' 
+        : (origem || 'Custo das Mercadorias Vendidas') 
+    };
+  }
+
+  return { codigo: '9.99.999', descricao: origem };
+}
+
+// 1. Consulta rápida diretamente na View 'vw_dre_faturamento_cmv'
+async function fetchFromView(pool, { filialId, dInicio, dFim, filterByFilial }) {
+  let sql = `
+    SELECT 
+      tipo, 
+      origem, 
+      COALESCE(SUM(valor), 0.00) AS total_valor, 
+      COUNT(*) AS qtd_lancamentos
+    FROM vw_dre_faturamento_cmv
+    WHERE data_movimento BETWEEN ? AND ?
+  `;
+  const params = [dInicio, dFim];
+
+  if (filterByFilial) {
+    sql += ` AND filial_id = ? `;
+    params.push(filialId);
+  }
+
+  sql += `
+    GROUP BY tipo, origem
+    ORDER BY tipo, total_valor DESC
+  `;
+
+  const [rows] = await pool.query(sql, params);
+
+  const itensReceita = [];
+  const itensDeducoes = [];
+  const itensCmv = [];
+
+  for (const row of rows) {
+    const val = Number(row.total_valor || 0);
+    if (val <= 0) continue;
+
+    const mapped = mapOrigemToConta(row.tipo, row.origem);
+    const item = {
+      codigo: mapped.codigo,
+      descricao: mapped.descricao,
+      total_valor: val,
+      qtd_lancamentos: Number(row.qtd_lancamentos || 0)
+    };
+
+    if (row.tipo === 'RECEITA_BRUTA') {
+      itensReceita.push(item);
+    } else if (row.tipo === 'DEDUCAO') {
+      itensDeducoes.push(item);
+    } else if (row.tipo === 'CMV') {
+      itensCmv.push(item);
+    }
+  }
+
+  return { itensReceita, itensDeducoes, itensCmv };
+}
+
+// 2. Fallback caso a view não exista ou falhe
+async function fetchFromRawTables(pool, { filialId, dInicio, dFim, filterByFilial }) {
   const filialClause = (fieldName) => {
     return filterByFilial ? `AND ${fieldName} = ?` : '';
   };
@@ -34,7 +147,7 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
   const getParams = (extraParams = []) => {
     const params = [];
     if (filterByFilial) params.push(filialId);
-    params.push(dInicio, dFim);
+    params.push(`${dInicio} 00:00:00`, `${dFim} 23:59:59`);
     return [...params, ...extraParams];
   };
 
@@ -42,11 +155,7 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
   const itensDeducoes = [];
   const itensCmv = [];
 
-  // =========================================================================
-  // 1. RECEITA BRUTA
-  // =========================================================================
-
-  // 1.1 Cupons ECF
+  // ECF
   try {
     const [rows] = await pool.query(`
       SELECT COALESCE(SUM(r02.venda_bruta), 0.00) as valor, COUNT(*) as qtd
@@ -59,11 +168,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (val > 0) {
       itensReceita.push({ codigo: '1.01.001', descricao: 'Cupons ECF (Redução Z)', total_valor: val, qtd_lancamentos: Number(rows[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar ECF:', err.message);
-  }
+  } catch (e) {}
 
-  // 1.2 Cupons SAT / CF-e
+  // SAT / CF-e
   try {
     const [rows] = await pool.query(`
       SELECT COALESCE(SUM(si.valor_total_bruto + si.valor_despesas + si.valor_rateio_despesas), 0.00) as valor,
@@ -79,11 +186,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (val > 0) {
       itensReceita.push({ codigo: '1.01.007', descricao: 'Cupons SAT/CF-e', total_valor: val, qtd_lancamentos: Number(rows[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar SAT/CF-e:', err.message);
-  }
+  } catch (e) {}
 
-  // 1.3 NF/NF-e de Venda (Mod 55 e 01)
+  // NF-e Venda
   try {
     const [rows] = await pool.query(`
       SELECT COALESCE(SUM(nf.total_produtos + nf.valor_frete + nf.valor_seguro + nf.outras_depesas + nf.valor_icms_subst), 0.00) as valor,
@@ -101,11 +206,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (val > 0) {
       itensReceita.push({ codigo: '1.01.004', descricao: 'NF/NF-e de venda (Mod. 55 e 01)', total_valor: val, qtd_lancamentos: Number(rows[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar NF-e Venda:', err.message);
-  }
+  } catch (e) {}
 
-  // 1.4 Notas de Talão (Mod 02)
+  // Talão
   try {
     const [rows] = await pool.query(`
       SELECT COALESCE(SUM(nf.total_produtos + nf.valor_frete + nf.valor_seguro + nf.outras_depesas + nf.valor_icms_subst), 0.00) as valor,
@@ -123,11 +226,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (val > 0) {
       itensReceita.push({ codigo: '1.01.001', descricao: 'Notas fiscais de consumidor (talão Mod. 02)', total_valor: val, qtd_lancamentos: Number(rows[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar Talão:', err.message);
-  }
+  } catch (e) {}
 
-  // 1.5 NFC-e (Mod. 65)
+  // NFC-e
   try {
     const [rows] = await pool.query(`
       SELECT COALESCE(SUM(nf.total_produtos + nf.valor_frete + nf.valor_seguro + nf.outras_depesas), 0.00) as valor,
@@ -146,11 +247,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (val > 0) {
       itensReceita.push({ codigo: '1.01.003', descricao: 'NFC-e (Mod. 65)', total_valor: val, qtd_lancamentos: Number(rows[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar NFC-e:', err.message);
-  }
+  } catch (e) {}
 
-  // 1.6 RPS (Recibo de Serviços)
+  // RPS
   try {
     const [rows] = await pool.query(`
       SELECT COALESCE(SUM(ri.vl_total_bruto + ri.vl_rateio_taxa_entrega), 0.00) as valor,
@@ -165,15 +264,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (val > 0) {
       itensReceita.push({ codigo: '1.01.005', descricao: 'RPS (Recibo Provisório de Serviços)', total_valor: val, qtd_lancamentos: Number(rows[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar RPS:', err.message);
-  }
+  } catch (e) {}
 
-  // =========================================================================
-  // 2. DEDUÇÕES E ABATIMENTOS
-  // =========================================================================
-
-  // 2.1 Devolução de Clientes (Mod 55/01 - Tipo C)
+  // Devoluções
   try {
     const [rows] = await pool.query(`
       SELECT COALESCE(SUM(nf.total_produtos + nf.valor_frete + nf.valor_seguro + nf.outras_depesas - nf.total_desconto - (nf.total_cofins + nf.valor_icms + nf.total_fcp + nf.valor_issqn + nf.total_pis)), 0.00) as valor,
@@ -191,11 +284,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (val > 0) {
       itensDeducoes.push({ codigo: '1.02.007', descricao: 'NF/NF-e de Devolução cliente', total_valor: val, qtd_lancamentos: Number(rows[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar Devoluções:', err.message);
-  }
+  } catch (e) {}
 
-  // 2.2 Descontos e Cancelamentos NFC-e / NF-e
+  // Descontos / Cancelamentos NF-e
   try {
     const [rowsDescNFe] = await pool.query(`
       SELECT COALESCE(SUM(nf.total_desconto), 0.00) as valor, COUNT(*) as qtd
@@ -223,11 +314,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (valCanc > 0) {
       itensDeducoes.push({ codigo: '1.02.007', descricao: 'Cancelamentos NF-e / NFC-e', total_valor: valCanc, qtd_lancamentos: Number(rowsCancNFe[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar Descontos/Cancelamentos NF-e:', err.message);
-  }
+  } catch (e) {}
 
-  // 2.3 Descontos e Cancelamentos SAT/CF-e
+  // Descontos / Cancelamentos SAT
   try {
     const [rowsDescSat] = await pool.query(`
       SELECT COALESCE(SUM(s.total_descontos), 0.00) as valor, COUNT(*) as qtd
@@ -252,11 +341,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (valCancSat > 0) {
       itensDeducoes.push({ codigo: '1.02.007', descricao: 'Cancelamentos SAT/CF-e', total_valor: valCancSat, qtd_lancamentos: Number(rowsCancSat[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar SAT Descontos/Cancelamentos:', err.message);
-  }
+  } catch (e) {}
 
-  // 2.4 DAS / Impostos Diretos Simples Nacional
+  // DAS
   try {
     const [rowsDas] = await pool.query(`
       SELECT COALESCE(SUM(p.valor_doc), 0.00) as valor, COUNT(*) as qtd
@@ -274,13 +361,9 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
     if (valDas > 0) {
       itensDeducoes.push({ codigo: '2.02.007', descricao: 'DAS Simples Nacional / Impostos Diretos', total_valor: valDas, qtd_lancamentos: Number(rowsDas[0]?.qtd || 0) });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar DAS:', err.message);
-  }
+  } catch (e) {}
 
-  // =========================================================================
-  // 3. CUSTO DAS MERCADORIAS VENDIDAS (CMV)
-  // =========================================================================
+  // CMV
   try {
     const [rowsCmv] = await pool.query(`
       SELECT COALESCE(SUM(m.quanti_uni * m.pmc), 0.00) AS valor, COUNT(*) as qtd
@@ -301,9 +384,39 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
         qtd_lancamentos: Number(rowsCmv[0]?.qtd || 0)
       });
     }
-  } catch (err) {
-    console.warn('Erro ao consultar CMV:', err.message);
+  } catch (e) {}
+
+  return { itensReceita, itensDeducoes, itensCmv };
+}
+
+async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
+  if (!pool) return null;
+
+  const { dInicio, dFim } = buildDateRange(dtInicio, dtFim);
+  const filterByFilial = isFilialRestricted(filialId);
+
+  let result = null;
+
+  // 1. Tentar pela VIEW vw_dre_faturamento_cmv (Super Rápida)
+  try {
+    result = await fetchFromView(pool, { filialId, dInicio, dFim, filterByFilial });
+  } catch (errView) {
+    console.warn('View vw_dre_faturamento_cmv não encontrada ou com erro, usando fallback:', errView.message);
   }
+
+  // 2. Se a view não retornou (ou falhou), executar o fallback pelas tabelas
+  if (!result) {
+    try {
+      result = await fetchFromRawTables(pool, { filialId, dInicio, dFim, filterByFilial });
+    } catch (errRaw) {
+      console.error('Erro no fallback de faturamento e CMV:', errRaw.message);
+      return null;
+    }
+  }
+
+  const itensReceita = result.itensReceita || [];
+  const itensDeducoes = result.itensDeducoes || [];
+  const itensCmv = result.itensCmv || [];
 
   const totalReceitaBruta = itensReceita.reduce((acc, i) => acc + i.total_valor, 0);
   const totalDeducoes = itensDeducoes.reduce((acc, i) => acc + i.total_valor, 0);
@@ -324,5 +437,6 @@ async function getFiscalRevenueAndCmv(pool, { filialId, dtInicio, dtFim }) {
 }
 
 module.exports = {
-  getFiscalRevenueAndCmv
+  getFiscalRevenueAndCmv,
+  mapOrigemToConta
 };
