@@ -16,10 +16,13 @@ export default function DreTable({ dreData, regime }) {
   const [expandedSections, setExpandedSections] = useState({});
 
   const toggleSection = (sectionId) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [sectionId]: !prev[sectionId]
-    }));
+    setExpandedSections(prev => {
+      const current = prev[sectionId] !== false;
+      return {
+        ...prev,
+        [sectionId]: !current
+      };
+    });
   };
 
   const expandAll = () => {
@@ -30,7 +33,10 @@ export default function DreTable({ dreData, regime }) {
   };
 
   const collapseAll = () => {
-    setExpandedSections({});
+    if (!dreData || !dreData.itensDRE) return;
+    const all = {};
+    dreData.itensDRE.filter(i => !i.isSubtotal).forEach(i => { all[i.id] = false; });
+    setExpandedSections(all);
   };
 
   const exportToExcel = () => {
@@ -111,15 +117,19 @@ export default function DreTable({ dreData, regime }) {
         <div className="flex items-center gap-2">
           <button
             onClick={expandAll}
-            className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-100 font-medium text-slate-600 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-100 font-semibold text-slate-700 transition-colors cursor-pointer"
+            title="Expandir todas as sessões analíticas"
           >
-            Expandir Tudo
+            <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+            <span>Expandir Tudo</span>
           </button>
           <button
             onClick={collapseAll}
-            className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-100 font-medium text-slate-600 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-100 font-semibold text-slate-700 transition-colors cursor-pointer"
+            title="Recolher todas as sessões analíticas"
           >
-            Recolher
+            <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+            <span>Recolher Tudo</span>
           </button>
           <button
             onClick={exportToExcel}
@@ -252,9 +262,9 @@ export default function DreTable({ dreData, regime }) {
 
                   {/* Linhas Filhas Analíticas de cada Conta */}
                   {isExpanded && hasContas &&
-                    item.contas.map((conta) => (
+                    item.contas.map((conta, idx) => (
                       <tr
-                        key={conta.codigo || conta.planocontas_id}
+                        key={`${item.id}_${conta.codigo || 'semcod'}_${conta.planocontas_id || idx}_${idx}`}
                         className="hover:bg-blue-50/40 transition-colors text-xs bg-slate-50/40"
                       >
                         <td className="py-2.5 px-6 pl-12 text-slate-500 font-mono">
