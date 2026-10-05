@@ -60,6 +60,25 @@ O sistema estará disponível em: **`http://localhost:3001`** (ou `http://localh
 
 ---
 
+## 🐳 Deploy com Docker
+
+### 1. Construir e Rodar com Dockerfile
+```bash
+# Construir a imagem
+docker build -t dre-financeiro .
+
+# Rodar o container expondo a porta 3001
+docker run -d -p 3001:3001 --name dre_financeiro dre-financeiro
+```
+
+### 2. Rodar com Docker Compose
+```bash
+docker compose up -d --build
+```
+Acesse em: `http://localhost:3001`
+
+---
+
 ## 🗄️ Estrutura das Tabelas MariaDB Suportadas
 
 ### Tabela `pagar`
