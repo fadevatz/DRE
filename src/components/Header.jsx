@@ -1,0 +1,108 @@
+import React from 'react';
+import { Database, RefreshCw, User, CheckCircle2, AlertCircle, HardDriveDownload } from 'lucide-react';
+
+export default function Header({ dbStatus, onOpenDbModal, onRefresh, isRefreshing, regime, onToggleRegime }) {
+  return (
+    <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-xs sticky top-0 z-30">
+      {/* Esquerda: Logo + Título + Status */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+          <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+          </svg>
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">
+              Painel Financeiro &amp; DRE
+            </h1>
+            {/* Regime Badge Toggle Rápido */}
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
+              regime === 'competencia'
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }`}>
+              Regime de {regime === 'competencia' ? 'Competência' : 'Caixa'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            {dbStatus.connected ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded-full font-medium border border-sky-100">
+                <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
+                MariaDB Conectado: <strong className="font-semibold">{dbStatus.database || 'Produção'}</strong>
+              </span>
+            ) : (
+              <button
+                onClick={onOpenDbModal}
+                className="inline-flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-0.5 rounded-full font-medium border border-amber-200 transition-colors cursor-pointer"
+                title="Clique para configurar acesso ao MariaDB"
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                Modo Demonstração • Clique para Conectar MariaDB
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Direita: Ações e Usuário (Idêntico ao layout da foto) */}
+      <div className="flex items-center gap-3">
+        {/* Alternar Regime */}
+        <div className="hidden sm:flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+          <button
+            onClick={() => onToggleRegime('competencia')}
+            className={`px-3 py-1.5 rounded-md transition-all ${
+              regime === 'competencia'
+                ? 'bg-white text-blue-700 shadow-xs font-bold'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Competência
+          </button>
+          <button
+            onClick={() => onToggleRegime('caixa')}
+            className={`px-3 py-1.5 rounded-md transition-all ${
+              regime === 'caixa'
+                ? 'bg-white text-emerald-700 shadow-xs font-bold'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Caixa
+          </button>
+        </div>
+
+        {/* Botão Configurar Banco (estilo botão azul da foto 'Carregar Relatório') */}
+        <button
+          onClick={onOpenDbModal}
+          className="flex items-center gap-2 bg-[#1877f2] hover:bg-[#166fe5] text-white px-4 py-2 rounded-lg font-semibold text-sm transition-all shadow-xs cursor-pointer active:scale-[0.98]"
+        >
+          <Database className="w-4 h-4" />
+          <span>Configurar Banco MariaDB</span>
+        </button>
+
+        {/* Botão Atualizar Dados (estilo botão com contorno 'Dados Originais') */}
+        <button
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg font-semibold text-sm border border-slate-300 transition-all shadow-2xs cursor-pointer disabled:opacity-50"
+          title="Recarregar Dados"
+        >
+          <RefreshCw className={`w-4 h-4 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Dados Originais</span>
+        </button>
+
+        {/* Perfil do Usuário */}
+        <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+          <div className="w-9 h-9 rounded-full bg-[#1877f2] text-white flex items-center justify-center font-bold text-sm shadow-xs">
+            <User className="w-5 h-5 text-white" />
+          </div>
+          <div className="hidden lg:block text-left leading-tight">
+            <p className="text-sm font-semibold text-slate-800">Maikon Fonseca</p>
+            <p className="text-xs text-slate-400">Financeiro DRE</p>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+

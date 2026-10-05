@@ -1,0 +1,19 @@
+services:
+  dre-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dre_financeiro
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - DB_HOST=host.docker.internal # Aponta para o MariaDB na máquina host se necessário
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
