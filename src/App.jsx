@@ -5,14 +5,12 @@ import KpiCards from './components/KpiCards';
 import DreTable from './components/DreTable';
 import ChartsView from './components/ChartsView';
 import LancamentosTable from './components/LancamentosTable';
-import DatabaseModal from './components/DatabaseModal';
 import { exportLancamentosToExcel } from './utils/excelExporter';
 import { Layers, LineChart, FileText } from 'lucide-react';
 
 export default function App() {
   // Estado de conexão com banco
   const [dbStatus, setDbStatus] = useState({ connected: false, message: 'Verificando...' });
-  const [isDbModalOpen, setIsDbModalOpen] = useState(false);
 
   // Filtros Globais
   const [regime, setRegime] = useState('competencia'); // 'competencia' ou 'caixa'
@@ -181,10 +179,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f3f6fa] pb-16">
-      {/* 1. Header Idêntico à Barra Superior da Imagem */}
+      {/* 1. Header com alternância de regime e ícone informativo */}
       <Header
         dbStatus={dbStatus}
-        onOpenDbModal={() => setIsDbModalOpen(true)}
         onRefresh={loadData}
         isRefreshing={isRefreshing}
         regime={regime}
@@ -195,31 +192,6 @@ export default function App() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-        {/* Banner Informativo Caso Esteja no Mock */}
-        {!dbStatus.connected && (
-          <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-            <div className="flex items-center gap-3">
-              <span className="flex h-3 w-3 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
-              </span>
-              <div>
-                <p className="text-sm font-bold text-slate-800">
-                  Visualização com Dados de Demonstração
-                </p>
-                <p className="text-xs text-slate-600">
-                  O painel está pronto para ler diretamente a tabela <code className="bg-white/80 px-1 py-0.5 rounded font-mono text-blue-700">pagar</code> e <code className="bg-white/80 px-1 py-0.5 rounded font-mono text-blue-700">planocontas</code> do seu MariaDB local.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setIsDbModalOpen(true)}
-              className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg transition-all shadow-xs shrink-0 cursor-pointer"
-            >
-              Conectar MariaDB Agora
-            </button>
-          </div>
-        )}
 
         {/* 2. Filtros de Análise (Exatamente como o card da foto) */}
         <FilterBar
@@ -343,17 +315,6 @@ export default function App() {
           />
         )}
       </main>
-
-      {/* Modal de Configuração do MariaDB */}
-      <DatabaseModal
-        isOpen={isDbModalOpen}
-        onClose={() => setIsDbModalOpen(false)}
-        onConnected={() => {
-          checkDbStatus();
-          loadFiliais();
-          loadData();
-        }}
-      />
     </div>
   );
 }

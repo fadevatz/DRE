@@ -29,7 +29,7 @@ export default function FilterBar({
             Filtros de Análise
           </h2>
           <span className="text-[11px] font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md border border-blue-100">
-            {regime === 'caixa' ? 'Caixa: Filtro por Vencimento (dtvenc)' : 'Competência: Filtro por Emissão (dt_emissao)'}
+            {regime === 'caixa' ? 'Caixa: Filtro por Pagamento (dt_pgto / valor pago)' : 'Competência: Filtro por Emissão (dt_emissao)'}
           </span>
           {(dtInicio || dtFim) && (
             <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-100">

@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { getPool, getStatus, getConfig, saveConfig, testConnection } = require('./db');
+const { getPool, getStatus } = require('./db');
 const { planocontasMock, pagarMock, filiaisMock } = require('./mockData');
 const { DRE_STRUCTURE, classifyAccount } = require('./dreClassifier');
 const { getFiscalRevenueAndCmv } = require('./revenueService');
@@ -43,38 +43,15 @@ function isDbAvailable() {
   return status.connected && status.tablesFound && status.tablesFound.pagar;
 }
 
-// 1. Status da conexão
+// 1. Status da conexão segura
 app.get('/api/status', (req, res) => {
   const status = getStatus();
   res.json({
-    ...status,
+    connected: status.connected,
+    message: status.message,
+    lastCheck: status.lastCheck,
     isUsingMock: !isDbAvailable()
   });
-});
-
-// 2. Obter configuração do MariaDB
-app.get('/api/database/config', (req, res) => {
-  res.json(getConfig());
-});
-
-// 3. Testar conexão com MariaDB
-app.post('/api/database/test', async (req, res) => {
-  const result = await testConnection(req.body);
-  res.json(result);
-});
-
-// 4. Salvar configuração e conectar
-app.post('/api/database/config', async (req, res) => {
-  try {
-    const success = await saveConfig(req.body);
-    const status = getStatus();
-    res.json({
-      success,
-      status
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
 });
 
 // 5. Listar filiais disponíveis
@@ -136,14 +113,16 @@ app.get('/api/kpis', async (req, res) => {
         params.push(searchParam, searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime: Competência usa dt_emissao, Caixa usa dtvenc
+      // Filtro de Período e Regime: Competência usa dt_emissao, Caixa busca em pagar por dt_pgto e valor_pago
       if (regime === 'caixa') {
+        whereClauses.push('p.dt_pgto IS NOT NULL');
+        whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(p.dtvenc) >= ?');
+          whereClauses.push('DATE(p.dt_pgto) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(p.dtvenc) <= ?');
+          whereClauses.push('DATE(p.dt_pgto) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -254,7 +233,7 @@ app.get('/api/kpis', async (req, res) => {
       );
     }
     if (regime === 'caixa') {
-      filtered = filtered.filter(p => p.dtvenc && (!dt_inicio || p.dtvenc >= dt_inicio) && (!dt_fim || p.dtvenc <= dt_fim));
+      filtered = filtered.filter(p => p.dt_pgto && Number(p.valor_pago || 0) > 0 && (!dt_inicio || p.dt_pgto >= dt_inicio) && (!dt_fim || p.dt_pgto <= dt_fim));
     } else {
       filtered = filtered.filter(p => {
         const d = p.dt_emissao || p.dt_competencia;
@@ -540,14 +519,16 @@ app.get('/api/dre', async (req, res) => {
         params.push(searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime na DRE: Competência por dt_emissao, Caixa por dtvenc
+      // Filtro de Período e Regime na DRE: Competência por dt_emissao, Caixa por dt_pgto e valor_pago
       if (regime === 'caixa') {
+        whereClauses.push('p.dt_pgto IS NOT NULL');
+        whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(p.dtvenc) >= ?');
+          whereClauses.push('DATE(p.dt_pgto) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(p.dtvenc) <= ?');
+          whereClauses.push('DATE(p.dt_pgto) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -635,7 +616,7 @@ app.get('/api/dre', async (req, res) => {
       );
     }
     if (regime === 'caixa') {
-      filtered = filtered.filter(p => p.dtvenc && (!dt_inicio || p.dtvenc >= dt_inicio) && (!dt_fim || p.dtvenc <= dt_fim));
+      filtered = filtered.filter(p => p.dt_pgto && Number(p.valor_pago || 0) > 0 && (!dt_inicio || p.dt_pgto >= dt_inicio) && (!dt_fim || p.dt_pgto <= dt_fim));
     } else {
       filtered = filtered.filter(p => {
         const d = p.dt_emissao || p.dt_competencia;
@@ -695,7 +676,12 @@ app.get('/api/graficos', async (req, res) => {
         params.push(searchParam, searchParam, searchParam);
       }
 
-      const dateField = regime === 'caixa' ? 'DATE(p.dtvenc)' : 'DATE(COALESCE(p.dt_emissao, p.dtcadastro))';
+      if (regime === 'caixa') {
+        whereClauses.push('p.dt_pgto IS NOT NULL');
+        whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
+      }
+
+      const dateField = regime === 'caixa' ? 'DATE(p.dt_pgto)' : 'DATE(COALESCE(p.dt_emissao, p.dtcadastro))';
       const valField = regime === 'caixa' ? 'p.valor_pago' : 'p.valor';
 
       if (dt_inicio && dt_inicio.trim() !== '') {
@@ -818,14 +804,16 @@ app.get('/api/lancamentos', async (req, res) => {
         baseParams.push(searchParam, searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime em Lançamentos: Competência por dt_emissao, Caixa por dtvenc
+      // Filtro de Período e Regime em Lançamentos: Competência por dt_emissao, Caixa por dt_pgto e valor_pago
       if (regime === 'caixa') {
+        baseWhereClauses.push('p.dt_pgto IS NOT NULL');
+        baseWhereClauses.push('COALESCE(p.valor_pago, 0) > 0');
         if (dt_inicio && dt_inicio.trim() !== '') {
-          baseWhereClauses.push('DATE(p.dtvenc) >= ?');
+          baseWhereClauses.push('DATE(p.dt_pgto) >= ?');
           baseParams.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          baseWhereClauses.push('DATE(p.dtvenc) <= ?');
+          baseWhereClauses.push('DATE(p.dt_pgto) <= ?');
           baseParams.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -935,7 +923,7 @@ app.get('/api/lancamentos', async (req, res) => {
       );
     }
     if (regime === 'caixa') {
-      filtered = filtered.filter(p => p.dtvenc && (!dt_inicio || p.dtvenc >= dt_inicio) && (!dt_fim || p.dtvenc <= dt_fim));
+      filtered = filtered.filter(p => p.dt_pgto && Number(p.valor_pago || 0) > 0 && (!dt_inicio || p.dt_pgto >= dt_inicio) && (!dt_fim || p.dt_pgto <= dt_fim));
     } else {
       filtered = filtered.filter(p => {
         const d = p.dt_emissao || p.dt_competencia;
