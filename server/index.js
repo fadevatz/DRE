@@ -102,7 +102,7 @@ app.get('/api/kpis', async (req, res) => {
 
       // Filtro de Filial (filial_id 1 - Escritorio vê todas as lojas)
       if (shouldFilterByFilial(filial_id)) {
-        whereClauses.push('p.filial_id = ?');
+        whereClauses.push('COALESCE(p.dafilial_id, p.filial_id) = ?');
         params.push(filial_id);
       }
 
@@ -522,7 +522,7 @@ app.get('/api/dre', async (req, res) => {
       let params = [];
 
       if (shouldFilterByFilial(filial_id)) {
-        whereClauses.push('p.filial_id = ?');
+        whereClauses.push('COALESCE(p.dafilial_id, p.filial_id) = ?');
         params.push(filial_id);
       }
       if (busca && busca.trim() !== '') {
@@ -686,7 +686,7 @@ app.get('/api/graficos', async (req, res) => {
       let params = [];
 
       if (shouldFilterByFilial(filial_id)) {
-        whereClauses.push('p.filial_id = ?');
+        whereClauses.push('COALESCE(p.dafilial_id, p.filial_id) = ?');
         params.push(filial_id);
       }
       if (busca && busca.trim() !== '') {
@@ -817,7 +817,7 @@ app.get('/api/lancamentos', async (req, res) => {
       let baseParams = [];
 
       if (shouldFilterByFilial(filial_id)) {
-        baseWhereClauses.push('p.filial_id = ?');
+        baseWhereClauses.push('COALESCE(p.dafilial_id, p.filial_id) = ?');
         baseParams.push(filial_id);
       }
       if (busca && busca.trim() !== '') {
@@ -890,7 +890,7 @@ app.get('/api/lancamentos', async (req, res) => {
       const queryParams = [...finalParams, reqLimit, offset];
       const sql = `
         SELECT 
-          p.filial_id,
+          COALESCE(p.dafilial_id, p.filial_id) as filial_id,
           p.pagar_id,
           p.NF,
           p.dt_emissao,
