@@ -6,6 +6,7 @@ const { getPool, getStatus, getConfig, saveConfig, testConnection } = require('.
 const { planocontasMock, pagarMock, filiaisMock } = require('./mockData');
 const { DRE_STRUCTURE, classifyAccount } = require('./dreClassifier');
 const { getFiscalRevenueAndCmv } = require('./revenueService');
+const { getExpensesFromView } = require('./expenseService');
 
 // Regra de Negócio: filial_id 1 - Escritorio vê informações de todas as lojas
 function shouldFilterByFilial(filialId) {
@@ -306,7 +307,7 @@ app.get('/api/kpis', async (req, res) => {
   }
 });
 
-function generateStructuredDre(rawRows, regime, fiscalData = null) {
+function generateStructuredDre(rawRows, regime, fiscalData = null, expenseRows = null) {
   // Inicializar seções analíticas baseadas no DRE_STRUCTURE
   const sectionBuckets = {};
   DRE_STRUCTURE.filter(s => !s.isSubtotal).forEach(s => {
@@ -321,53 +322,85 @@ function generateStructuredDre(rawRows, regime, fiscalData = null) {
     };
   });
 
-  // Distribuir cada conta retornada para a sua sessão oficial
-  rawRows.forEach(row => {
-    const val = Number(row.total_valor || 0);
-    const qtd = Number(row.qtd_lancamentos || 0);
-    const classification = classifyAccount(row.codigo, row.descricao);
-    const targetSectionId = classification.sectionId || '7';
+  // Se regime for competência e houver despesas apuradas pela view 'vw_dre_despesas_analitico':
+  // As despesas operacionais da DRE (Comerciais, Administrativas, Gerais, Financeiras, etc.)
+  // são alimentadas DIRETAMENTE da view, garantindo que qualquer novo plano de contas cadastrado
+  // e associado à estrutura da DRE no ERP apareça automaticamente sem alteração de código!
+  if (regime === 'competencia' && expenseRows && expenseRows.length > 0) {
+    expenseRows.forEach(row => {
+      const val = Number(row.total_valor || 0);
+      const qtd = Number(row.qtd_lancamentos || 0);
+      const targetSectionId = row.sectionId || '7';
 
-    // REGRA DE NEGÓCIO CONTÁBIL:
-    // 1. A Sessão 1 (Receita Bruta) e a Sessão 2 (Deduções da Receita Bruta / Impostos sobre Vendas)
-    //    são alimentadas exclusivamente pelas movimentações fiscais e apuração da view 'vw_dre_faturamento_cmv'.
-    //    Títulos da tabela 'pagar' (como 2.02.003 - ICMS DeSTDA / SEFAZ ou 2.02.007 - DAS a pagar) representam 
-    //    guias financeiras a pagar e NÃO devem entrar na Sessão 2 da DRE como deduções do faturamento.
-    // 2. Sessão 3 (CMV): Os planos de contas 2.01.001 (DUPLICATAS DE ENTRADA) e 2.01.002 (DUPLICATAS DE RECARGA E FICHAS BALANCA)
-    //    são títulos de compras a pagar a fornecedores e NÃO fazem parte do Custo das Mercadorias Vendidas (CMV).
-    //    O CMV da DRE vem exclusivamente da apuração de custo médio de vendas (PMC) da view 'vw_dre_faturamento_cmv'.
-    if (
-      targetSectionId === '1' ||
-      targetSectionId === '2' ||
-      row.codigo === '2.02.003' ||
-      row.planocontas_id === 32 ||
-      String(row.codigo || '').startsWith('2.02.') ||
-      row.codigo === '2.01.001' ||
-      row.codigo === '2.01.002' ||
-      String(row.codigo || '').startsWith('2.01.')
-    ) {
-      return;
-    }
+      if (sectionBuckets[targetSectionId]) {
+        const bucket = sectionBuckets[targetSectionId];
+        bucket.total += val;
+        bucket.qtdLancamentos += qtd;
 
-    if (sectionBuckets[targetSectionId]) {
-      const bucket = sectionBuckets[targetSectionId];
-      bucket.total += val;
-      bucket.qtdLancamentos += qtd;
-
-      const codeKey = row.codigo || 'SEM_CODIGO';
-      if (!bucket.contasMap[codeKey]) {
-        bucket.contasMap[codeKey] = {
-          planocontas_id: row.planocontas_id,
-          codigo: row.codigo,
-          descricao: row.descricao || classification.descricaoPadrao,
-          total_valor: 0,
-          qtd_lancamentos: 0
-        };
+        const codeKey = row.codigo || 'SEM_CODIGO';
+        if (!bucket.contasMap[codeKey]) {
+          bucket.contasMap[codeKey] = {
+            planocontas_id: row.planocontas_id,
+            codigo: row.codigo,
+            descricao: row.descricao,
+            total_valor: 0,
+            qtd_lancamentos: 0
+          };
+        }
+        bucket.contasMap[codeKey].total_valor += val;
+        bucket.contasMap[codeKey].qtd_lancamentos += qtd;
       }
-      bucket.contasMap[codeKey].total_valor += val;
-      bucket.contasMap[codeKey].qtd_lancamentos += qtd;
-    }
-  });
+    });
+  } else {
+    // Regime de Caixa ou fallback se a view não estiver disponível:
+    // Distribuir cada conta retornada de 'pagar' para a sua sessão oficial
+    rawRows.forEach(row => {
+      const val = Number(row.total_valor || 0);
+      const qtd = Number(row.qtd_lancamentos || 0);
+      const classification = classifyAccount(row.codigo, row.descricao);
+      const targetSectionId = classification.sectionId || '7';
+
+      // REGRA DE NEGÓCIO CONTÁBIL:
+      // 1. A Sessão 1 (Receita Bruta) e a Sessão 2 (Deduções da Receita Bruta / Impostos sobre Vendas)
+      //    são alimentadas exclusivamente pelas movimentações fiscais e apuração da view 'vw_dre_faturamento_cmv'.
+      //    Títulos da tabela 'pagar' (como 2.02.003 - ICMS DeSTDA / SEFAZ ou 2.02.007 - DAS a pagar) representam 
+      //    guias financeiras a pagar e NÃO devem entrar na Sessão 2 da DRE como deduções do faturamento.
+      // 2. Sessão 3 (CMV): Os planos de contas 2.01.001 (DUPLICATAS DE ENTRADA) e 2.01.002 (DUPLICATAS DE RECARGA E FICHAS BALANCA)
+      //    são títulos de compras a pagar a fornecedores e NÃO fazem parte do Custo das Mercadorias Vendidas (CMV).
+      //    O CMV da DRE vem exclusivamente da apuração de custo médio de vendas (PMC) da view 'vw_dre_faturamento_cmv'.
+      if (
+        targetSectionId === '1' ||
+        targetSectionId === '2' ||
+        row.codigo === '2.02.003' ||
+        row.planocontas_id === 32 ||
+        String(row.codigo || '').startsWith('2.02.') ||
+        row.codigo === '2.01.001' ||
+        row.codigo === '2.01.002' ||
+        String(row.codigo || '').startsWith('2.01.')
+      ) {
+        return;
+      }
+
+      if (sectionBuckets[targetSectionId]) {
+        const bucket = sectionBuckets[targetSectionId];
+        bucket.total += val;
+        bucket.qtdLancamentos += qtd;
+
+        const codeKey = row.codigo || 'SEM_CODIGO';
+        if (!bucket.contasMap[codeKey]) {
+          bucket.contasMap[codeKey] = {
+            planocontas_id: row.planocontas_id,
+            codigo: row.codigo,
+            descricao: row.descricao || classification.descricaoPadrao,
+            total_valor: 0,
+            qtd_lancamentos: 0
+          };
+        }
+        bucket.contasMap[codeKey].total_valor += val;
+        bucket.contasMap[codeKey].qtd_lancamentos += qtd;
+      }
+    });
+  }
 
   // Integrar dados fiscais de movimentação (Receita Bruta, Deduções e CMV)
   if (fiscalData) {
@@ -567,9 +600,24 @@ app.get('/api/dre', async (req, res) => {
         console.warn('Falha ao calcular dados fiscais:', errFiscal.message);
       }
 
-      // 2. Consultar despesas da tabela pagar
+      // 2. No regime de competência, consultar despesas analíticas da view oficial 'vw_dre_despesas_analitico'
+      let expenseRows = null;
+      if (regime === 'competencia') {
+        try {
+          expenseRows = await getExpensesFromView(pool, {
+            filialId: filial_id,
+            dtInicio: dt_inicio,
+            dtFim: dt_fim,
+            busca
+          });
+        } catch (errExp) {
+          console.warn('Falha ao consultar view vw_dre_despesas_analitico:', errExp.message);
+        }
+      }
+
+      // 3. Consultar despesas da tabela pagar (usado para Caixa ou fallback de competência)
       const [rows] = await pool.query(sql, params);
-      const dreResult = generateStructuredDre(rows, regime, fiscalData);
+      const dreResult = generateStructuredDre(rows, regime, fiscalData, expenseRows);
       return res.json(dreResult);
     }
 
