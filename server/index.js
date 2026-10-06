@@ -291,14 +291,24 @@ function generateStructuredDre(rawRows, regime, fiscalData = null, expenseRows =
   // Inicializar seções analíticas baseadas no DRE_STRUCTURE
   const sectionBuckets = {};
   DRE_STRUCTURE.filter(s => !s.isSubtotal).forEach(s => {
+    const isFixed = s.id === 'depreciacao' || Boolean(s.fixedValue);
+    const fixedVal = Number(s.fixedValue || 0);
     sectionBuckets[s.id] = {
       id: s.id,
       title: s.title,
       type: s.type,
       sign: s.sign,
-      total: 0,
-      qtdLancamentos: 0,
-      contasMap: {}
+      total: isFixed ? fixedVal : 0,
+      qtdLancamentos: isFixed ? 1 : 0,
+      contasMap: isFixed ? {
+        'DPR.001': {
+          planocontas_id: 0,
+          codigo: 'DPR.001',
+          descricao: 'DEPRECIAÇÃO FIXA MENSAL',
+          total_valor: fixedVal,
+          qtd_lancamentos: 1
+        }
+      } : {}
     };
   });
 
@@ -447,14 +457,15 @@ function generateStructuredDre(rawRows, regime, fiscalData = null, expenseRows =
   const s7 = sectionBuckets['7']?.total || 0;
   const s8 = sectionBuckets['8']?.total || 0;
   const lajir = resBruto - s4 - s5 - s6 - s7 + s8;
+  const valorDepreciacao = sectionBuckets['depreciacao']?.total || 3085.68;
   const s9 = sectionBuckets['9']?.total || 0;
   const s10 = sectionBuckets['10']?.total || 0;
-  const lair = lajir - s9 + s10;
+  const lair = lajir - valorDepreciacao - s9 + s10;
   const s11 = sectionBuckets['11']?.total || 0;
   const resLiquido = lair - s11;
 
   // Base para análise vertical (% AV)
-  const totalDespesas = s2 + s3 + s4 + s5 + s6 + s7 + s9 + s11;
+  const totalDespesas = s2 + s3 + s4 + s5 + s6 + s7 + valorDepreciacao + s9 + s11;
   const baseAV = s1 > 0 ? s1 : (totalDespesas > 0 ? totalDespesas : 1);
 
   // Itens na ordem oficial com subtotais destacados
@@ -504,6 +515,7 @@ function generateStructuredDre(rawRows, regime, fiscalData = null, expenseRows =
     receitaLiquida: recLiquida,
     resultadoBruto: resBruto,
     lajir,
+    depreciacao: valorDepreciacao,
     lair,
     resultadoLiquido: resLiquido,
     totalDespesas,

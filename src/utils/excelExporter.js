@@ -160,7 +160,7 @@ export async function exportDreToExcel(dreData, regime) {
 
       const row = worksheet.getRow(currentRowIdx);
       row.values = [
-        item.id,
+        item.id === 'depreciacao' ? '(-)' : item.id,
         item.title,
         Number(item.qtdLancamentos || 0),
         valorFinal,

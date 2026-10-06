@@ -180,8 +180,19 @@ const DRE_STRUCTURE = [
     formula: ['subtotal_resultado_bruto', '-', '4', '-', '5', '-', '6', '-', '7', '+', '8']
   },
   {
-    id: '9',
+    id: 'depreciacao',
     order: 12,
+    title: '(-) DEPRECIAÇÃO',
+    type: 'depreciacao',
+    sign: -1,
+    fixedValue: 3085.68,
+    accounts: [
+      { codigo: 'DPR.001', descricao: 'DEPRECIAÇÃO FIXA MENSAL' }
+    ]
+  },
+  {
+    id: '9',
+    order: 13,
     title: '9. DESPESAS FINANCEIRAS',
     type: 'despesa_financeira',
     sign: -1,
@@ -196,7 +207,7 @@ const DRE_STRUCTURE = [
   },
   {
     id: '10',
-    order: 13,
+    order: 14,
     title: '10. RECEITAS FINANCEIRAS',
     type: 'receita_financeira',
     sign: 1,
@@ -212,10 +223,10 @@ const DRE_STRUCTURE = [
   },
   {
     id: 'subtotal_lair',
-    order: 14,
+    order: 15,
     isSubtotal: true,
     title: '(=) RESULTADO ANTES DO IRPJ/CSLL (LAIR)',
-    formula: ['subtotal_lajir', '-', '9', '+', '10']
+    formula: ['subtotal_lajir', '-', 'depreciacao', '-', '9', '+', '10']
   },
   {
     id: '11',

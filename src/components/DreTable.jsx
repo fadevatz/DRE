@@ -199,7 +199,7 @@ export default function DreTable({ dreData, regime }) {
                             <ChevronRight className="w-4 h-4 text-slate-400" />
                           )
                         )}
-                        <span>{item.id}</span>
+                        <span>{item.id === 'depreciacao' ? '(-)' : item.id}</span>
                       </div>
                     </td>
                     <td className="py-3 px-6 text-slate-800 font-bold uppercase tracking-tight text-xs sm:text-sm">
