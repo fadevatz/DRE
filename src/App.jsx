@@ -6,6 +6,7 @@ import DreTable from './components/DreTable';
 import ChartsView from './components/ChartsView';
 import LancamentosTable from './components/LancamentosTable';
 import DatabaseModal from './components/DatabaseModal';
+import { exportLancamentosToExcel } from './utils/excelExporter';
 import { Layers, LineChart, FileText } from 'lucide-react';
 
 export default function App() {
@@ -13,13 +14,18 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState({ connected: false, message: 'Verificando...' });
   const [isDbModalOpen, setIsDbModalOpen] = useState(false);
 
-  // Filtros
+  // Filtros Globais
   const [regime, setRegime] = useState('competencia'); // 'competencia' ou 'caixa'
   const [filiais, setFiliais] = useState([]);
   const [selectedFilial, setSelectedFilial] = useState('1');
   const [dtInicio, setDtInicio] = useState('');
   const [dtFim, setDtFim] = useState('');
   const [busca, setBusca] = useState('');
+
+  // Filtro de Plano de Contas e exportação para Lançamentos Analíticos
+  const [filtroPlano, setFiltroPlano] = useState('todos'); // 'todos' | 'sem_plano' | 'com_plano'
+  const [lancamentosCounts, setLancamentosCounts] = useState({ total: 0, semPlano: 0, comPlano: 0 });
+  const [isExportingLancamentos, setIsExportingLancamentos] = useState(false);
 
   // Dados carregados da API
   const [kpis, setKpis] = useState(null);
@@ -64,22 +70,31 @@ export default function App() {
     setLoading(true);
     setIsRefreshing(true);
     try {
-      const queryParams = new URLSearchParams({
+      const baseQueryParams = new URLSearchParams({
+        regime,
+        filial_id: selectedFilial,
+        dt_inicio: dtInicio,
+        dt_fim: dtFim,
+        busca
+      }).toString();
+
+      const lancQueryParams = new URLSearchParams({
         regime,
         filial_id: selectedFilial,
         dt_inicio: dtInicio,
         dt_fim: dtFim,
         busca,
+        filtro_plano: filtroPlano,
         page: String(page),
         limit: '50'
       }).toString();
 
       // Buscar simultaneamente KPIs, DRE, Gráficos e Lançamentos
       const [kpiRes, dreRes, chartRes, lancRes] = await Promise.all([
-        fetch(`/api/kpis?${queryParams}`),
-        fetch(`/api/dre?${queryParams}`),
-        fetch(`/api/graficos?${queryParams}`),
-        fetch(`/api/lancamentos?${queryParams}`)
+        fetch(`/api/kpis?${baseQueryParams}`),
+        fetch(`/api/dre?${baseQueryParams}`),
+        fetch(`/api/graficos?${baseQueryParams}`),
+        fetch(`/api/lancamentos?${lancQueryParams}`)
       ]);
 
       const [kpiJson, dreJson, chartJson, lancJson] = await Promise.all([
@@ -94,13 +109,16 @@ export default function App() {
       setChartData(chartJson);
       setLancamentos(lancJson.records || []);
       setTotalLancamentos(lancJson.totalRecords || 0);
+      if (lancJson.counts) {
+        setLancamentosCounts(lancJson.counts);
+      }
     } catch (err) {
       console.error('Erro ao buscar dados:', err);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [regime, selectedFilial, dtInicio, dtFim, busca, page]);
+  }, [regime, selectedFilial, dtInicio, dtFim, busca, filtroPlano, page]);
 
   useEffect(() => {
     checkDbStatus();
@@ -111,11 +129,53 @@ export default function App() {
     loadData();
   }, [loadData]);
 
+  // Exportar lançamentos analíticos filtrados para planilha Excel
+  const handleExportLancamentosExcel = async () => {
+    try {
+      setIsExportingLancamentos(true);
+      const queryParams = new URLSearchParams({
+        regime,
+        filial_id: selectedFilial,
+        dt_inicio: dtInicio,
+        dt_fim: dtFim,
+        busca,
+        filtro_plano: filtroPlano,
+        export: 'true',
+        limit: '50000'
+      }).toString();
+
+      const res = await fetch(`/api/lancamentos?${queryParams}`);
+      const data = await res.json();
+      const recordsToExport = data.records || lancamentos;
+
+      const fObj = filiais.find(f => (typeof f === 'object' ? String(f.filial_id) : String(f)) === String(selectedFilial));
+      const filialNome = fObj
+        ? `${selectedFilial} - ${fObj.nome || (selectedFilial === '1' ? 'Escritório (Todas as Lojas)' : `Filial #${selectedFilial}`)}`
+        : (selectedFilial === '1' ? '1 - Escritório (Todas as Lojas)' : `Filial #${selectedFilial}`);
+
+      await exportLancamentosToExcel({
+        lancamentos: recordsToExport,
+        regime,
+        filialNome,
+        filtroPlano,
+        dtInicio,
+        dtFim,
+        busca
+      });
+    } catch (err) {
+      console.error('Erro ao exportar lançamentos para Excel:', err);
+      alert('Falha ao exportar lançamentos para Excel: ' + err.message);
+    } finally {
+      setIsExportingLancamentos(false);
+    }
+  };
+
   const handleResetFilters = () => {
     setSelectedFilial('1');
     setDtInicio('');
     setDtFim('');
     setBusca('');
+    setFiltroPlano('todos');
     setPage(1);
   };
 
@@ -239,7 +299,14 @@ export default function App() {
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>Lançamentos Analíticos ({totalLancamentos})</span>
+            <span>
+              Lançamentos Analíticos ({lancamentosCounts.total > 0 ? lancamentosCounts.total : totalLancamentos})
+            </span>
+            {lancamentosCounts.semPlano > 0 && (
+              <span className="text-[10px] font-bold bg-amber-500 text-white px-1.5 py-0.2 rounded-full">
+                {lancamentosCounts.semPlano}
+              </span>
+            )}
           </button>
         </div>
 
@@ -261,10 +328,18 @@ export default function App() {
           <LancamentosTable
             lancamentos={lancamentos}
             totalRecords={totalLancamentos}
+            counts={lancamentosCounts}
+            filtroPlano={filtroPlano}
+            onFiltroPlanoChange={(novoFiltro) => {
+              setFiltroPlano(novoFiltro);
+              setPage(1);
+            }}
             page={page}
             limit={50}
             onPageChange={setPage}
             regime={regime}
+            onExportExcel={handleExportLancamentosExcel}
+            isExporting={isExportingLancamentos}
           />
         )}
       </main>

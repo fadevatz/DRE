@@ -732,62 +732,94 @@ app.get('/api/lancamentos', async (req, res) => {
       dt_fim,
       filial_id,
       busca,
+      filtro_plano = 'todos',
+      sem_plano,
       page = 1,
-      limit = 50
+      limit = 50,
+      export: isExport = 'false'
     } = req.query;
 
-    const offset = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
+    const apenasSemPlano = filtro_plano === 'sem_plano' || sem_plano === 'true' || sem_plano === '1';
+    const apenasComPlano = filtro_plano === 'com_plano';
+    const isExportMode = isExport === 'true' || isExport === '1';
+
+    const reqLimit = isExportMode ? Math.min(50000, parseInt(limit, 10) || 50000) : Math.max(1, Math.min(1000, parseInt(limit, 10) || 50));
+    const reqPage = Math.max(1, parseInt(page, 10));
+    const offset = isExportMode ? 0 : (reqPage - 1) * reqLimit;
 
     if (isDbAvailable()) {
       const pool = getPool();
-      let whereClauses = ['p.apagado = "N"'];
-      let params = [];
+      let baseWhereClauses = ['p.apagado = "N"'];
+      let baseParams = [];
 
       if (shouldFilterByFilial(filial_id)) {
-        whereClauses.push('p.filial_id = ?');
-        params.push(filial_id);
+        baseWhereClauses.push('p.filial_id = ?');
+        baseParams.push(filial_id);
       }
       if (busca && busca.trim() !== '') {
-        whereClauses.push('(p.historico LIKE ? OR f.nome LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
+        baseWhereClauses.push('(p.historico LIKE ? OR f.nome LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
         const searchParam = `%${busca.trim()}%`;
-        params.push(searchParam, searchParam, searchParam, searchParam);
+        baseParams.push(searchParam, searchParam, searchParam, searchParam);
       }
 
       if (regime === 'caixa') {
-        whereClauses.push('p.dt_pgto IS NOT NULL');
+        baseWhereClauses.push('p.dt_pgto IS NOT NULL');
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) >= ?');
-          params.push(dt_inicio.trim().split('T')[0]);
+          baseWhereClauses.push('DATE(p.dt_pgto) >= ?');
+          baseParams.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) <= ?');
-          params.push(dt_fim.trim().split('T')[0]);
+          baseWhereClauses.push('DATE(p.dt_pgto) <= ?');
+          baseParams.push(dt_fim.trim().split('T')[0]);
         }
       } else {
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
-          params.push(dt_inicio.trim().split('T')[0]);
+          baseWhereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
+          baseParams.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
-          params.push(dt_fim.trim().split('T')[0]);
+          baseWhereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
+          baseParams.push(dt_fim.trim().split('T')[0]);
         }
       }
 
-      const whereSql = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+      const baseWhereSql = baseWhereClauses.length > 0 ? 'WHERE ' + baseWhereClauses.join(' AND ') : '';
 
-      // Total count
-      const [countResult] = await pool.query(
-        `SELECT COUNT(*) as total 
-         FROM pagar p 
-         LEFT JOIN fornece f ON p.fornece_id = f.fornece_id 
-         ${whereSql}`,
-        params
+      // 1. Obter contadores consolidados do período para a interface (Total, Sem Plano e Com Plano)
+      const [countsResult] = await pool.query(
+        `SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN (p.planocontas_id IS NULL OR p.planocontas_id = 0 OR pc.codigo IS NULL OR TRIM(pc.codigo) = '') THEN 1 ELSE 0 END) as sem_plano,
+          SUM(CASE WHEN (p.planocontas_id IS NOT NULL AND p.planocontas_id > 0 AND pc.codigo IS NOT NULL AND TRIM(pc.codigo) != '') THEN 1 ELSE 0 END) as com_plano
+        FROM pagar p 
+        LEFT JOIN planocontas pc ON p.planocontas_id = pc.planocontas_id
+        LEFT JOIN fornece f ON p.fornece_id = f.fornece_id
+        ${baseWhereSql}`,
+        baseParams
       );
-      const totalRecords = countResult[0].total;
 
-      // Query paginada
-      const queryParams = [...params, parseInt(limit, 10), offset];
+      const totalCountGeral = Number(countsResult[0]?.total || 0);
+      const semPlanoCountGeral = Number(countsResult[0]?.sem_plano || 0);
+      const comPlanoCountGeral = Number(countsResult[0]?.com_plano || 0);
+
+      // 2. Cláusula específica para a seleção ativa
+      let finalWhereClauses = [...baseWhereClauses];
+      let finalParams = [...baseParams];
+
+      if (apenasSemPlano) {
+        finalWhereClauses.push('(p.planocontas_id IS NULL OR p.planocontas_id = 0 OR pc.codigo IS NULL OR TRIM(pc.codigo) = "")');
+      } else if (apenasComPlano) {
+        finalWhereClauses.push('(p.planocontas_id IS NOT NULL AND p.planocontas_id > 0 AND pc.codigo IS NOT NULL AND TRIM(pc.codigo) != "")');
+      }
+
+      const finalWhereSql = finalWhereClauses.length > 0 ? 'WHERE ' + finalWhereClauses.join(' AND ') : '';
+
+      let totalRecords = totalCountGeral;
+      if (apenasSemPlano) totalRecords = semPlanoCountGeral;
+      else if (apenasComPlano) totalRecords = comPlanoCountGeral;
+
+      // 3. Query paginada / exportação
+      const queryParams = [...finalParams, reqLimit, offset];
       const sql = `
         SELECT 
           p.filial_id,
@@ -812,7 +844,7 @@ app.get('/api/lancamentos', async (req, res) => {
         FROM pagar p
         LEFT JOIN fornece f ON p.fornece_id = f.fornece_id
         LEFT JOIN planocontas pc ON p.planocontas_id = pc.planocontas_id
-        ${whereSql}
+        ${finalWhereSql}
         ORDER BY p.pagar_id DESC
         LIMIT ? OFFSET ?
       `;
@@ -821,8 +853,13 @@ app.get('/api/lancamentos', async (req, res) => {
 
       return res.json({
         totalRecords,
-        page: parseInt(page, 10),
-        limit: parseInt(limit, 10),
+        counts: {
+          total: totalCountGeral,
+          semPlano: semPlanoCountGeral,
+          comPlano: comPlanoCountGeral
+        },
+        page: reqPage,
+        limit: reqLimit,
         records: rows
       });
     }
@@ -849,6 +886,16 @@ app.get('/api/lancamentos', async (req, res) => {
       });
     }
 
+    const mockTotal = filtered.length;
+    const mockSemPlano = filtered.filter(p => !p.planocontas_id || p.planocontas_id === 0).length;
+    const mockComPlano = mockTotal - mockSemPlano;
+
+    if (apenasSemPlano) {
+      filtered = filtered.filter(p => !p.planocontas_id || p.planocontas_id === 0);
+    } else if (apenasComPlano) {
+      filtered = filtered.filter(p => p.planocontas_id && p.planocontas_id > 0);
+    }
+
     const records = filtered.map(p => {
       const pc = planocontasMock.find(c => c.planocontas_id === p.planocontas_id);
       return {
@@ -858,11 +905,18 @@ app.get('/api/lancamentos', async (req, res) => {
       };
     });
 
+    const paginatedRecords = isExportMode ? records : records.slice(offset, offset + reqLimit);
+
     res.json({
       totalRecords: records.length,
-      page: 1,
-      limit: 50,
-      records
+      counts: {
+        total: mockTotal,
+        semPlano: mockSemPlano,
+        comPlano: mockComPlano
+      },
+      page: reqPage,
+      limit: reqLimit,
+      records: paginatedRecords
     });
   } catch (err) {
     console.error('Erro em /api/lancamentos:', err);
