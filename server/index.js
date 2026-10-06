@@ -329,6 +329,15 @@ function generateStructuredDre(rawRows, regime, fiscalData = null) {
     const classification = classifyAccount(row.codigo, row.descricao);
     const targetSectionId = classification.sectionId || '7';
 
+    // REGRA DE NEGÓCIO CONTÁBIL:
+    // A Sessão 1 (Receita Bruta) e a Sessão 2 (Deduções da Receita Bruta / Impostos sobre Vendas)
+    // são alimentadas exclusivamente pelas movimentações fiscais e apuração da view 'vw_dre_faturamento_cmv'.
+    // Títulos da tabela 'pagar' (como 2.02.003 - ICMS DeSTDA / SEFAZ ou 2.02.007 - DAS a pagar) representam 
+    // guias financeiras a pagar e NÃO devem entrar na Sessão 2 da DRE como deduções do faturamento.
+    if (targetSectionId === '1' || targetSectionId === '2' || row.codigo === '2.02.003' || row.planocontas_id === 32 || String(row.codigo || '').startsWith('2.02.')) {
+      return;
+    }
+
     if (sectionBuckets[targetSectionId]) {
       const bucket = sectionBuckets[targetSectionId];
       bucket.total += val;

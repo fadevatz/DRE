@@ -100,6 +100,8 @@ async function fetchFromView(pool, { filialId, dtInicio, dtFim, filterByFilial }
       tipo, 
       origem, 
       COALESCE(SUM(valor), 0.00) AS total_valor, 
+      COALESCE(SUM(valor_icms), 0.00) AS total_icms, 
+      COALESCE(SUM(valor_icms_st), 0.00) AS total_icms_st, 
       COUNT(*) AS qtd_lancamentos
     FROM vw_dre_faturamento_cmv
     ${whereSql}
@@ -113,8 +115,14 @@ async function fetchFromView(pool, { filialId, dtInicio, dtFim, filterByFilial }
   const itensDeducoes = [];
   const itensCmv = [];
 
+  let totalIcmsView = 0;
+  let totalIcmsStView = 0;
+
   for (const row of rows) {
     const val = Number(row.total_valor || 0);
+    totalIcmsView += Number(row.total_icms || 0);
+    totalIcmsStView += Number(row.total_icms_st || 0);
+
     if (val <= 0) continue;
 
     const mapped = mapOrigemToConta(row.tipo, row.origem);
@@ -132,6 +140,25 @@ async function fetchFromView(pool, { filialId, dtInicio, dtFim, filterByFilial }
     } else if (row.tipo === 'CMV') {
       itensCmv.push(item);
     }
+  }
+
+  // Adiciona ICMS apurado das receitas caso exista na view
+  if (totalIcmsView > 0) {
+    itensDeducoes.push({
+      codigo: '2.02.003',
+      descricao: 'ICMS sobre Vendas (Destacado nas Receitas)',
+      total_valor: totalIcmsView,
+      qtd_lancamentos: 1
+    });
+  }
+
+  if (totalIcmsStView > 0) {
+    itensDeducoes.push({
+      codigo: '2.02.003',
+      descricao: 'ICMS Substituição Tributária (ICMS-ST sobre Vendas)',
+      total_valor: totalIcmsStView,
+      qtd_lancamentos: 1
+    });
   }
 
   return { itensReceita, itensDeducoes, itensCmv };
