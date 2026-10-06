@@ -135,25 +135,24 @@ app.get('/api/kpis', async (req, res) => {
         params.push(searchParam, searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime
+      // Filtro de Período e Regime: Competência usa dt_emissao, Caixa usa dtvenc
       if (regime === 'caixa') {
-        whereClauses.push('p.dt_pgto IS NOT NULL');
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) >= ?');
+          whereClauses.push('DATE(p.dtvenc) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) <= ?');
+          whereClauses.push('DATE(p.dtvenc) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
-        // Competência
+        // Competência (filtro oficial por dt_emissao)
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
+          whereClauses.push('DATE(COALESCE(p.dt_emissao, p.dtcadastro)) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
+          whereClauses.push('DATE(COALESCE(p.dt_emissao, p.dtcadastro)) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       }
@@ -254,10 +253,10 @@ app.get('/api/kpis', async (req, res) => {
       );
     }
     if (regime === 'caixa') {
-      filtered = filtered.filter(p => p.dt_pgto && (!dt_inicio || p.dt_pgto >= dt_inicio) && (!dt_fim || p.dt_pgto <= dt_fim));
+      filtered = filtered.filter(p => p.dtvenc && (!dt_inicio || p.dtvenc >= dt_inicio) && (!dt_fim || p.dtvenc <= dt_fim));
     } else {
       filtered = filtered.filter(p => {
-        const d = p.dt_competencia || p.dt_emissao;
+        const d = p.dt_emissao || p.dt_competencia;
         return (!dt_inicio || d >= dt_inicio) && (!dt_fim || d <= dt_fim);
       });
     }
@@ -330,11 +329,23 @@ function generateStructuredDre(rawRows, regime, fiscalData = null) {
     const targetSectionId = classification.sectionId || '7';
 
     // REGRA DE NEGÓCIO CONTÁBIL:
-    // A Sessão 1 (Receita Bruta) e a Sessão 2 (Deduções da Receita Bruta / Impostos sobre Vendas)
-    // são alimentadas exclusivamente pelas movimentações fiscais e apuração da view 'vw_dre_faturamento_cmv'.
-    // Títulos da tabela 'pagar' (como 2.02.003 - ICMS DeSTDA / SEFAZ ou 2.02.007 - DAS a pagar) representam 
-    // guias financeiras a pagar e NÃO devem entrar na Sessão 2 da DRE como deduções do faturamento.
-    if (targetSectionId === '1' || targetSectionId === '2' || row.codigo === '2.02.003' || row.planocontas_id === 32 || String(row.codigo || '').startsWith('2.02.')) {
+    // 1. A Sessão 1 (Receita Bruta) e a Sessão 2 (Deduções da Receita Bruta / Impostos sobre Vendas)
+    //    são alimentadas exclusivamente pelas movimentações fiscais e apuração da view 'vw_dre_faturamento_cmv'.
+    //    Títulos da tabela 'pagar' (como 2.02.003 - ICMS DeSTDA / SEFAZ ou 2.02.007 - DAS a pagar) representam 
+    //    guias financeiras a pagar e NÃO devem entrar na Sessão 2 da DRE como deduções do faturamento.
+    // 2. Sessão 3 (CMV): Os planos de contas 2.01.001 (DUPLICATAS DE ENTRADA) e 2.01.002 (DUPLICATAS DE RECARGA E FICHAS BALANCA)
+    //    são títulos de compras a pagar a fornecedores e NÃO fazem parte do Custo das Mercadorias Vendidas (CMV).
+    //    O CMV da DRE vem exclusivamente da apuração de custo médio de vendas (PMC) da view 'vw_dre_faturamento_cmv'.
+    if (
+      targetSectionId === '1' ||
+      targetSectionId === '2' ||
+      row.codigo === '2.02.003' ||
+      row.planocontas_id === 32 ||
+      String(row.codigo || '').startsWith('2.02.') ||
+      row.codigo === '2.01.001' ||
+      row.codigo === '2.01.002' ||
+      String(row.codigo || '').startsWith('2.01.')
+    ) {
       return;
     }
 
@@ -496,23 +507,24 @@ app.get('/api/dre', async (req, res) => {
         params.push(searchParam, searchParam, searchParam);
       }
 
+      // Filtro de Período e Regime na DRE: Competência por dt_emissao, Caixa por dtvenc
       if (regime === 'caixa') {
-        whereClauses.push('p.dt_pgto IS NOT NULL');
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) >= ?');
+          whereClauses.push('DATE(p.dtvenc) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) <= ?');
+          whereClauses.push('DATE(p.dtvenc) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
+        // Competência (filtro oficial por dt_emissao)
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
+          whereClauses.push('DATE(COALESCE(p.dt_emissao, p.dtcadastro)) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
+          whereClauses.push('DATE(COALESCE(p.dt_emissao, p.dtcadastro)) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       }
@@ -575,10 +587,10 @@ app.get('/api/dre', async (req, res) => {
       );
     }
     if (regime === 'caixa') {
-      filtered = filtered.filter(p => p.dt_pgto && (!dt_inicio || p.dt_pgto >= dt_inicio) && (!dt_fim || p.dt_pgto <= dt_fim));
+      filtered = filtered.filter(p => p.dtvenc && (!dt_inicio || p.dtvenc >= dt_inicio) && (!dt_fim || p.dtvenc <= dt_fim));
     } else {
       filtered = filtered.filter(p => {
-        const d = p.dt_competencia || p.dt_emissao;
+        const d = p.dt_emissao || p.dt_competencia;
         return (!dt_inicio || d >= dt_inicio) && (!dt_fim || d <= dt_fim);
       });
     }
@@ -635,12 +647,8 @@ app.get('/api/graficos', async (req, res) => {
         params.push(searchParam, searchParam, searchParam);
       }
 
-      const dateField = regime === 'caixa' ? 'DATE(p.dt_pgto)' : 'DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro))';
+      const dateField = regime === 'caixa' ? 'DATE(p.dtvenc)' : 'DATE(COALESCE(p.dt_emissao, p.dtcadastro))';
       const valField = regime === 'caixa' ? 'p.valor_pago' : 'p.valor';
-
-      if (regime === 'caixa') {
-        whereClauses.push('p.dt_pgto IS NOT NULL');
-      }
 
       if (dt_inicio && dt_inicio.trim() !== '') {
         whereClauses.push(`${dateField} >= ?`);
@@ -762,23 +770,24 @@ app.get('/api/lancamentos', async (req, res) => {
         baseParams.push(searchParam, searchParam, searchParam, searchParam);
       }
 
+      // Filtro de Período e Regime em Lançamentos: Competência por dt_emissao, Caixa por dtvenc
       if (regime === 'caixa') {
-        baseWhereClauses.push('p.dt_pgto IS NOT NULL');
         if (dt_inicio && dt_inicio.trim() !== '') {
-          baseWhereClauses.push('DATE(p.dt_pgto) >= ?');
+          baseWhereClauses.push('DATE(p.dtvenc) >= ?');
           baseParams.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          baseWhereClauses.push('DATE(p.dt_pgto) <= ?');
+          baseWhereClauses.push('DATE(p.dtvenc) <= ?');
           baseParams.push(dt_fim.trim().split('T')[0]);
         }
       } else {
+        // Competência (filtro oficial por dt_emissao)
         if (dt_inicio && dt_inicio.trim() !== '') {
-          baseWhereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) >= ?');
+          baseWhereClauses.push('DATE(COALESCE(p.dt_emissao, p.dtcadastro)) >= ?');
           baseParams.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          baseWhereClauses.push('DATE(COALESCE(p.dt_competencia, p.dt_emissao, p.dtcadastro)) <= ?');
+          baseWhereClauses.push('DATE(COALESCE(p.dt_emissao, p.dtcadastro)) <= ?');
           baseParams.push(dt_fim.trim().split('T')[0]);
         }
       }
@@ -878,10 +887,10 @@ app.get('/api/lancamentos', async (req, res) => {
       );
     }
     if (regime === 'caixa') {
-      filtered = filtered.filter(p => p.dt_pgto && (!dt_inicio || p.dt_pgto >= dt_inicio) && (!dt_fim || p.dt_pgto <= dt_fim));
+      filtered = filtered.filter(p => p.dtvenc && (!dt_inicio || p.dtvenc >= dt_inicio) && (!dt_fim || p.dtvenc <= dt_fim));
     } else {
       filtered = filtered.filter(p => {
-        const d = p.dt_competencia || p.dt_emissao;
+        const d = p.dt_emissao || p.dt_competencia;
         return (!dt_inicio || d >= dt_inicio) && (!dt_fim || d <= dt_fim);
       });
     }

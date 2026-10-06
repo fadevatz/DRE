@@ -46,8 +46,7 @@ const DRE_STRUCTURE = [
     type: 'custo',
     sign: -1,
     accounts: [
-      { codigo: '2.01.001', descricao: 'DUPLICATAS DE ENTRADA' },
-      { codigo: '2.01.002', descricao: 'DUPLICATAS DE RECARGA E FICHAS BALANCA' },
+      { codigo: '3.01.001', descricao: 'CUSTO DAS MERCADORIAS VENDIDAS (CMV)' },
       { codigo: '3.05.022', descricao: 'FRETE' }
     ]
   },
@@ -281,7 +280,7 @@ function classifyAccount(codigo, descricao) {
   if (descUpper.includes('DEVOLUCAO') || descUpper.includes('ICMS') || descUpper.includes('PIS') || descUpper.includes('COFINS') || descUpper.includes('DAS SIMPLES')) {
     return { sectionId: '2', sectionTitle: '2. DEDUÇÕES E ABATIMENTOS', sectionSign: -1, sectionType: 'deducao' };
   }
-  if (descUpper.includes('DUPLICATA') || descUpper.includes('FORNECEDOR') || descUpper.includes('MERCADORIA') || descUpper.includes('FRETE')) {
+  if (descUpper.includes('FRETE')) {
     return { sectionId: '3', sectionTitle: '3. CUSTO DAS MERCADORIAS VENDIDAS (CMV)', sectionSign: -1, sectionType: 'custo' };
   }
   if (descUpper.includes('TAXA') && (descUpper.includes('CARTAO') || descUpper.includes('POS')) || descUpper.includes('COMISSAO') || descUpper.includes('MARKETING') || descUpper.includes('PROPAGANDA')) {
@@ -307,7 +306,7 @@ function classifyAccount(codigo, descricao) {
   if (cleanCode.startsWith('1')) {
     return { sectionId: '1', sectionTitle: '1. RECEITA BRUTA', sectionSign: 1, sectionType: 'receita' };
   }
-  if (cleanCode.startsWith('2.01')) {
+  if (cleanCode.startsWith('3.01')) {
     return { sectionId: '3', sectionTitle: '3. CUSTO DAS MERCADORIAS VENDIDAS (CMV)', sectionSign: -1, sectionType: 'custo' };
   }
   if (cleanCode.startsWith('2.02')) {

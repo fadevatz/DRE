@@ -63,7 +63,7 @@ function mapOrigemToConta(tipo, origem) {
 
   if (tipo === 'CMV') {
     return { 
-      codigo: '2.01.001', 
+      codigo: '3.01.001', 
       descricao: orig.includes('PMC') 
         ? 'Custo das Mercadorias Vendidas (CMV - PMC Estoque)' 
         : (origem || 'Custo das Mercadorias Vendidas') 
