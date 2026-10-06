@@ -1,15 +1,18 @@
 import React from 'react';
 import { Database, RefreshCw, User, CheckCircle2, AlertCircle, HardDriveDownload } from 'lucide-react';
+import logoDrogaria from '../assets/logo-drogaria-sc.png';
 
 export default function Header({ dbStatus, onOpenDbModal, onRefresh, isRefreshing, regime, onToggleRegime }) {
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-xs sticky top-0 z-30">
       {/* Esquerda: Logo + Título + Status */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
-          <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-          </svg>
+        <div className="w-11 h-11 rounded-xl overflow-hidden shadow-xs border border-slate-200/90 shrink-0 bg-[#42b39f] flex items-center justify-center">
+          <img
+            src={logoDrogaria}
+            alt="Drogaria SC - Somos Cuidado"
+            className="w-full h-full object-cover"
+          />
         </div>
         <div>
           <div className="flex items-center gap-2">
