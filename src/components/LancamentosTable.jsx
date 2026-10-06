@@ -79,8 +79,15 @@ export default function LancamentosTable({
                       <span className="font-semibold text-slate-900">{r.pagar_id}</span>
                       {r.NF ? <span className="block text-[10px] text-slate-400">NF: {r.NF}</span> : null}
                     </td>
-                    <td className="py-2.5 px-4 font-medium text-slate-800 max-w-[200px] truncate" title={r.nome_razao_cedente}>
-                      {r.nome_razao_cedente || 'Não informado'}
+                    <td className="py-2.5 px-4 max-w-[240px]" title={r.fornecedor_nome || r.nome_razao_cedente}>
+                      <span className="font-semibold text-slate-800 block truncate">
+                        {r.fornecedor_nome || r.nome_razao_cedente || 'Fornecedor não informado'}
+                      </span>
+                      {r.fornece_id ? (
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          Cód: #{r.fornece_id}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2.5 px-4 text-slate-600 max-w-[220px] truncate" title={r.historico}>
                       {r.historico || '-'}

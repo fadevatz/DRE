@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, RefreshCw, User, CheckCircle2, AlertCircle, HardDriveDownload } from 'lucide-react';
+import { Database, User, CheckCircle2, AlertCircle, HardDriveDownload } from 'lucide-react';
 import logoDrogaria from '../assets/logo-drogaria-sc.png';
 
 export default function Header({ dbStatus, onOpenDbModal, onRefresh, isRefreshing, regime, onToggleRegime }) {
@@ -27,23 +27,6 @@ export default function Header({ dbStatus, onOpenDbModal, onRefresh, isRefreshin
             }`}>
               Regime de {regime === 'competencia' ? 'Competência' : 'Caixa'}
             </span>
-          </div>
-          <div className="flex items-center gap-2 mt-1">
-            {dbStatus.connected ? (
-              <span className="inline-flex items-center gap-1.5 text-xs text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded-full font-medium border border-sky-100">
-                <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
-                MariaDB Conectado: <strong className="font-semibold">{dbStatus.database || 'Produção'}</strong>
-              </span>
-            ) : (
-              <button
-                onClick={onOpenDbModal}
-                className="inline-flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-0.5 rounded-full font-medium border border-amber-200 transition-colors cursor-pointer"
-                title="Clique para configurar acesso ao MariaDB"
-              >
-                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                Modo Demonstração • Clique para Conectar MariaDB
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -81,17 +64,6 @@ export default function Header({ dbStatus, onOpenDbModal, onRefresh, isRefreshin
         >
           <Database className="w-4 h-4" />
           <span>Configurar Banco MariaDB</span>
-        </button>
-
-        {/* Botão Atualizar Dados (estilo botão com contorno 'Dados Originais') */}
-        <button
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg font-semibold text-sm border border-slate-300 transition-all shadow-2xs cursor-pointer disabled:opacity-50"
-          title="Recarregar Dados"
-        >
-          <RefreshCw className={`w-4 h-4 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Dados Originais</span>
         </button>
 
         {/* Perfil do Usuário */}

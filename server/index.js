@@ -130,9 +130,9 @@ app.get('/api/kpis', async (req, res) => {
 
       // Filtro de Busca
       if (busca && busca.trim() !== '') {
-        whereClauses.push('(p.historico LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
+        whereClauses.push('(p.historico LIKE ? OR f.nome LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
         const searchParam = `%${busca.trim()}%`;
-        params.push(searchParam, searchParam, searchParam);
+        params.push(searchParam, searchParam, searchParam, searchParam);
       }
 
       // Filtro de Período e Regime
@@ -739,9 +739,9 @@ app.get('/api/lancamentos', async (req, res) => {
         params.push(filial_id);
       }
       if (busca && busca.trim() !== '') {
-        whereClauses.push('(p.historico LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
+        whereClauses.push('(p.historico LIKE ? OR f.nome LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
         const searchParam = `%${busca.trim()}%`;
-        params.push(searchParam, searchParam, searchParam);
+        params.push(searchParam, searchParam, searchParam, searchParam);
       }
 
       if (regime === 'caixa') {
@@ -769,7 +769,10 @@ app.get('/api/lancamentos', async (req, res) => {
 
       // Total count
       const [countResult] = await pool.query(
-        `SELECT COUNT(*) as total FROM pagar p ${whereSql}`,
+        `SELECT COUNT(*) as total 
+         FROM pagar p 
+         LEFT JOIN fornece f ON p.fornece_id = f.fornece_id 
+         ${whereSql}`,
         params
       );
       const totalRecords = countResult[0].total;
@@ -786,6 +789,8 @@ app.get('/api/lancamentos', async (req, res) => {
           p.dt_pgto,
           p.dt_competencia,
           p.historico,
+          p.fornece_id,
+          COALESCE(NULLIF(TRIM(f.nome), ''), NULLIF(TRIM(p.nome_razao_cedente), ''), 'Fornecedor não informado') as fornecedor_nome,
           p.nome_razao_cedente,
           p.valor,
           p.valor_pago,
@@ -796,6 +801,7 @@ app.get('/api/lancamentos', async (req, res) => {
           pc.codigo as plano_codigo,
           pc.descricao as plano_descricao
         FROM pagar p
+        LEFT JOIN fornece f ON p.fornece_id = f.fornece_id
         LEFT JOIN planocontas pc ON p.planocontas_id = pc.planocontas_id
         ${whereSql}
         ORDER BY p.pagar_id DESC
