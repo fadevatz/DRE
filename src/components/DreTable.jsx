@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, FileSpreadsheet, Layers, ArrowDownRight, ArrowUpRight, CheckCircle2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { ChevronDown, ChevronRight, FileSpreadsheet, Layers, ArrowDownRight, ArrowUpRight, CheckCircle2, Loader2 } from 'lucide-react';
+import { exportDreToExcel } from '../utils/excelExporter';
 
 function formatMoney(value) {
   if (value === undefined || value === null || isNaN(value)) return 'R$ 0,00';
@@ -14,6 +14,7 @@ function formatMoney(value) {
 
 export default function DreTable({ dreData, regime }) {
   const [expandedSections, setExpandedSections] = useState({});
+  const [isExporting, setIsExporting] = useState(false);
 
   const toggleSection = (sectionId) => {
     setExpandedSections(prev => {
@@ -39,48 +40,17 @@ export default function DreTable({ dreData, regime }) {
     setExpandedSections(all);
   };
 
-  const exportToExcel = () => {
-    if (!dreData || !dreData.itensDRE || dreData.itensDRE.length === 0) return;
-
-    const data = [];
-    dreData.itensDRE.forEach(item => {
-      if (item.isSubtotal) {
-        data.push({
-          'Classificação': item.title,
-          'Código': '',
-          'Descrição da Conta': '',
-          'Qtd Lançamentos': '',
-          'Valor (R$)': item.total,
-          '% AV': `${(item.percentual || 0).toFixed(2)}%`
-        });
-      } else {
-        data.push({
-          'Classificação': item.title,
-          'Código': '',
-          'Descrição da Conta': `TOTAL ${item.title}`,
-          'Qtd Lançamentos': item.qtdLancamentos,
-          'Valor (R$)': item.total,
-          '% AV': `${(item.percentual || 0).toFixed(2)}%`
-        });
-        if (item.contas && item.contas.length > 0) {
-          item.contas.forEach(c => {
-            data.push({
-              'Classificação': '',
-              'Código': c.codigo,
-              'Descrição da Conta': c.descricao,
-              'Qtd Lançamentos': c.qtd_lancamentos,
-              'Valor (R$)': c.total_valor,
-              '% AV': `${(c.percentual || 0).toFixed(2)}%`
-            });
-          });
-        }
-      }
-    });
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, `DRE_${regime.toUpperCase()}`);
-    XLSX.writeFile(wb, `dre_${regime}_${new Date().toISOString().split('T')[0]}.xlsx`);
+  const handleExport = async () => {
+    if (!dreData || !dreData.itensDRE || dreData.itensDRE.length === 0 || isExporting) return;
+    try {
+      setIsExporting(true);
+      await exportDreToExcel(dreData, regime);
+    } catch (err) {
+      console.error('Erro ao exportar DRE para Excel:', err);
+      alert('Erro ao gerar planilha Excel: ' + err.message);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const itens = dreData?.itensDRE || [];
@@ -132,11 +102,22 @@ export default function DreTable({ dreData, regime }) {
             <span>Recolher Tudo</span>
           </button>
           <button
-            onClick={exportToExcel}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 font-semibold text-white transition-colors shadow-2xs cursor-pointer"
+            onClick={handleExport}
+            disabled={isExporting}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 font-semibold text-white transition-colors shadow-2xs cursor-pointer disabled:opacity-60"
+            title="Exportar planilha DRE com o mesmo layout e cores do painel"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Exportar Excel</span>
+            {isExporting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Gerando Excel...</span>
+              </>
+            ) : (
+              <>
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Exportar Excel</span>
+              </>
+            )}
           </button>
         </div>
       </div>
