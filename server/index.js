@@ -6,7 +6,7 @@ const { getPool, getStatus } = require('./db');
 const { planocontasMock, pagarMock, filiaisMock } = require('./mockData');
 const { DRE_STRUCTURE, classifyAccount } = require('./dreClassifier');
 const { getFiscalRevenueAndCmv } = require('./revenueService');
-const { getExpensesFromView } = require('./expenseService');
+const { getExpensesFromView, mapGrupoToSection } = require('./expenseService');
 
 // Regra de Negócio: filial_id 1 - Escritorio vê informações de todas as lojas
 function shouldFilterByFilial(filialId) {
@@ -93,7 +93,7 @@ app.get('/api/filiais', async (req, res) => {
 // 6. Indicadores de Topo (Cards KPI fiéis ao layout do painel)
 app.get('/api/kpis', async (req, res) => {
   try {
-    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca } = req.query;
+    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, criterio_caixa = 'dt_pgto' } = req.query;
 
     if (isDbAvailable()) {
       const pool = getPool();
@@ -113,16 +113,17 @@ app.get('/api/kpis', async (req, res) => {
         params.push(searchParam, searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime: Competência usa dt_emissao, Caixa busca em pagar por dt_pgto e valor_pago
+      // Filtro de Período e Regime: Competência usa dt_emissao, Caixa busca em pagar por dt_pgto (ou dtvenc pago)
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
         whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
+        const dataColCaixa = criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)';
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) >= ?');
+          whereClauses.push(`${dataColCaixa} >= ?`);
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) <= ?');
+          whereClauses.push(`${dataColCaixa} <= ?`);
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -336,28 +337,39 @@ function generateStructuredDre(rawRows, regime, fiscalData = null, expenseRows =
     rawRows.forEach(row => {
       const val = Number(row.total_valor || 0);
       const qtd = Number(row.qtd_lancamentos || 0);
-      const classification = classifyAccount(row.codigo, row.descricao);
-      const targetSectionId = classification.sectionId || '7';
+      
+      // 1. Priorizar associação direta do banco (dre_item / dre_item_associacao)
+      let targetSectionId = null;
+      if (row.dre_item_id) {
+        targetSectionId = mapGrupoToSection(row.dre_item_id, row.dre_grupo_descricao);
+      }
+      // 2. Fallback baseado no classificador de contas
+      if (!targetSectionId) {
+        const classification = classifyAccount(row.codigo, row.descricao);
+        targetSectionId = classification.sectionId || '7';
+      }
 
       // REGRA DE NEGÓCIO CONTÁBIL:
-      // 1. A Sessão 1 (Receita Bruta) e a Sessão 2 (Deduções da Receita Bruta / Impostos sobre Vendas)
-      //    são alimentadas exclusivamente pelas movimentações fiscais e apuração da view 'vw_dre_faturamento_cmv'.
-      //    Títulos da tabela 'pagar' (como 2.02.003 - ICMS DeSTDA / SEFAZ ou 2.02.007 - DAS a pagar) representam 
-      //    guias financeiras a pagar e NÃO devem entrar na Sessão 2 da DRE como deduções do faturamento.
-      // 2. Sessão 3 (CMV): Os planos de contas 2.01.001 (DUPLICATAS DE ENTRADA) e 2.01.002 (DUPLICATAS DE RECARGA E FICHAS BALANCA)
-      //    são títulos de compras a pagar a fornecedores e NÃO fazem parte do Custo das Mercadorias Vendidas (CMV).
-      //    O CMV da DRE vem exclusivamente da apuração de custo médio de vendas (PMC) da view 'vw_dre_faturamento_cmv'.
+      // A Sessão 1 (Receita Bruta) e a Sessão 2 (Deduções da Receita Bruta / Impostos sobre Vendas)
+      // vêm exclusivamente das movimentações fiscais. Guias a pagar (como 2.02.003 - ICMS DeSTDA)
+      // não entram na Seção 2 da DRE como deduções do faturamento.
       if (
         targetSectionId === '1' ||
         targetSectionId === '2' ||
         row.codigo === '2.02.003' ||
         row.planocontas_id === 32 ||
-        String(row.codigo || '').startsWith('2.02.') ||
-        row.codigo === '2.01.001' ||
-        row.codigo === '2.01.002' ||
-        String(row.codigo || '').startsWith('2.01.')
+        String(row.codigo || '').startsWith('2.02.')
       ) {
         return;
+      }
+
+      // 3. Os planos de contas 2.01.001 (DUPLICATAS DE ENTRADA) e 2.01.002 (DUPLICATAS DE RECARGA)
+      //    NÃO pertencem ao Custo das Mercadorias Vendidas (CMV - Seção 3).
+      //    No ERP, 2.01.001 é associado a Despesas Comerciais (Seção 4) e 2.01.002 a Outras Despesas (Seção 7).
+      if (row.codigo === '2.01.001' && targetSectionId === '3') {
+        targetSectionId = '4'; // 4. DESPESAS COMERCIAIS
+      } else if (row.codigo === '2.01.002' && targetSectionId === '3') {
+        targetSectionId = '7'; // 7. OUTRAS DESPESAS
       }
 
       if (sectionBuckets[targetSectionId]) {
@@ -502,7 +514,7 @@ function generateStructuredDre(rawRows, regime, fiscalData = null, expenseRows =
 // 7. Demonstrativo DRE Estruturado
 app.get('/api/dre', async (req, res) => {
   try {
-    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca } = req.query;
+    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, criterio_caixa = 'dt_pgto' } = req.query;
 
     if (isDbAvailable()) {
       const pool = getPool();
@@ -519,16 +531,17 @@ app.get('/api/dre', async (req, res) => {
         params.push(searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime na DRE: Competência por dt_emissao, Caixa por dt_pgto e valor_pago
+      // Filtro de Período e Regime na DRE: Competência por dt_emissao, Caixa por dt_pgto (ou dtvenc pago)
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
         whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
+        const dataColCaixa = criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)';
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) >= ?');
+          whereClauses.push(`${dataColCaixa} >= ?`);
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push('DATE(p.dt_pgto) <= ?');
+          whereClauses.push(`${dataColCaixa} <= ?`);
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -554,10 +567,14 @@ app.get('/api/dre', async (req, res) => {
           COALESCE(pc.totalizador, 'N') as totalizador,
           COALESCE(pc.operacao, 'D') as operacao,
           COALESCE(pc.opdesp, 'S') as opdesp,
+          COALESCE(di.item_id, 0) as dre_item_id,
+          di.descricao as dre_grupo_descricao,
           COUNT(p.pagar_id) as qtd_lancamentos,
           SUM(COALESCE(${valorField}, 0)) as total_valor
         FROM pagar p
         LEFT JOIN planocontas pc ON p.planocontas_id = pc.planocontas_id
+        LEFT JOIN dre_item_associacao dia ON dia.id = pc.planocontas_id AND dia.apagado = 'N'
+        LEFT JOIN dre_item di ON di.item_id = dia.item_id AND di.apagado = 'N'
         ${whereSql}
         GROUP BY 
           pc.planocontas_id,
@@ -565,7 +582,9 @@ app.get('/api/dre', async (req, res) => {
           pc.descricao,
           pc.totalizador,
           pc.operacao,
-          pc.opdesp
+          pc.opdesp,
+          di.item_id,
+          di.descricao
         ORDER BY pc.codigo ASC
       `;
 
@@ -659,7 +678,7 @@ app.get('/api/dre', async (req, res) => {
 // 8. Gráficos (Evolução Temporal e Categorias)
 app.get('/api/graficos', async (req, res) => {
   try {
-    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca } = req.query;
+    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, criterio_caixa = 'dt_pgto' } = req.query;
 
     if (isDbAvailable()) {
       const pool = getPool();
@@ -681,7 +700,9 @@ app.get('/api/graficos', async (req, res) => {
         whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
       }
 
-      const dateField = regime === 'caixa' ? 'DATE(p.dt_pgto)' : 'DATE(COALESCE(p.dt_emissao, p.dtcadastro))';
+      const dateField = regime === 'caixa'
+        ? (criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)')
+        : 'DATE(COALESCE(p.dt_emissao, p.dtcadastro))';
       const valField = regime === 'caixa' ? 'p.valor_pago' : 'p.valor';
 
       if (dt_inicio && dt_inicio.trim() !== '') {
@@ -778,7 +799,8 @@ app.get('/api/lancamentos', async (req, res) => {
       sem_plano,
       page = 1,
       limit = 50,
-      export: isExport = 'false'
+      export: isExport = 'false',
+      criterio_caixa = 'dt_pgto'
     } = req.query;
 
     const apenasSemPlano = filtro_plano === 'sem_plano' || sem_plano === 'true' || sem_plano === '1';
@@ -804,16 +826,17 @@ app.get('/api/lancamentos', async (req, res) => {
         baseParams.push(searchParam, searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime em Lançamentos: Competência por dt_emissao, Caixa por dt_pgto e valor_pago
+      // Filtro de Período e Regime em Lançamentos: Competência por dt_emissao, Caixa por dt_pgto (ou dtvenc pago)
       if (regime === 'caixa') {
         baseWhereClauses.push('p.dt_pgto IS NOT NULL');
         baseWhereClauses.push('COALESCE(p.valor_pago, 0) > 0');
+        const dataColCaixa = criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)';
         if (dt_inicio && dt_inicio.trim() !== '') {
-          baseWhereClauses.push('DATE(p.dt_pgto) >= ?');
+          baseWhereClauses.push(`${dataColCaixa} >= ?`);
           baseParams.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          baseWhereClauses.push('DATE(p.dt_pgto) <= ?');
+          baseWhereClauses.push(`${dataColCaixa} <= ?`);
           baseParams.push(dt_fim.trim().split('T')[0]);
         }
       } else {

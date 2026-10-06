@@ -14,6 +14,7 @@ export default function App() {
 
   // Filtros Globais
   const [regime, setRegime] = useState('competencia'); // 'competencia' ou 'caixa'
+  const [criterioCaixa, setCriterioCaixa] = useState('dt_pgto'); // 'dt_pgto' (Data Pagamento) ou 'dtvenc' (Vencimento Pago)
   const [filiais, setFiliais] = useState([]);
   const [selectedFilial, setSelectedFilial] = useState('1');
   const [dtInicio, setDtInicio] = useState('');
@@ -73,7 +74,8 @@ export default function App() {
         filial_id: selectedFilial,
         dt_inicio: dtInicio,
         dt_fim: dtFim,
-        busca
+        busca,
+        criterio_caixa: criterioCaixa
       }).toString();
 
       const lancQueryParams = new URLSearchParams({
@@ -83,6 +85,7 @@ export default function App() {
         dt_fim: dtFim,
         busca,
         filtro_plano: filtroPlano,
+        criterio_caixa: criterioCaixa,
         page: String(page),
         limit: '50'
       }).toString();
@@ -116,7 +119,7 @@ export default function App() {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [regime, selectedFilial, dtInicio, dtFim, busca, filtroPlano, page]);
+  }, [regime, criterioCaixa, selectedFilial, dtInicio, dtFim, busca, filtroPlano, page]);
 
   useEffect(() => {
     checkDbStatus();
@@ -138,6 +141,7 @@ export default function App() {
         dt_fim: dtFim,
         busca,
         filtro_plano: filtroPlano,
+        criterio_caixa: criterioCaixa,
         export: 'true',
         limit: '50000'
       }).toString();
@@ -204,6 +208,11 @@ export default function App() {
           regime={regime}
           onChangeRegime={(r) => {
             setRegime(r);
+            setPage(1);
+          }}
+          criterioCaixa={criterioCaixa}
+          onChangeCriterioCaixa={(c) => {
+            setCriterioCaixa(c);
             setPage(1);
           }}
           dtInicio={dtInicio}

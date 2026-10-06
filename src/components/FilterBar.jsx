@@ -7,6 +7,8 @@ export default function FilterBar({
   onChangeFilial,
   regime,
   onChangeRegime,
+  criterioCaixa = 'dt_pgto',
+  onChangeCriterioCaixa,
   dtInicio,
   onChangeDtInicio,
   dtFim,
@@ -28,9 +30,39 @@ export default function FilterBar({
           <h2 className="text-base font-bold text-slate-800 tracking-tight">
             Filtros de Análise
           </h2>
-          <span className="text-[11px] font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md border border-blue-100">
-            {regime === 'caixa' ? 'Caixa: Filtro por Pagamento (dt_pgto / valor pago)' : 'Competência: Filtro por Emissão (dt_emissao)'}
-          </span>
+          {regime === 'caixa' ? (
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
+              <span className="text-slate-500 font-medium px-1.5 hidden sm:inline">Data Caixa:</span>
+              <button
+                type="button"
+                onClick={() => onChangeCriterioCaixa && onChangeCriterioCaixa('dt_pgto')}
+                className={`px-2 py-0.5 rounded font-semibold transition-all cursor-pointer ${
+                  criterioCaixa === 'dt_pgto'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+                title="Filtra pela data em que o pagamento foi realizado (dt_pgto)"
+              >
+                Pagamento (dt_pgto)
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeCriterioCaixa && onChangeCriterioCaixa('dtvenc')}
+                className={`px-2 py-0.5 rounded font-semibold transition-all cursor-pointer ${
+                  criterioCaixa === 'dtvenc'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+                title="Filtra pela data de vencimento dos títulos pagos (idêntico à conferência do ERP)"
+              >
+                Vencimento Pago (dtvenc)
+              </button>
+            </div>
+          ) : (
+            <span className="text-[11px] font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md border border-blue-100">
+              Competência: Filtro por Emissão (dt_emissao)
+            </span>
+          )}
           {(dtInicio || dtFim) && (
             <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-100">
               Período ativo
