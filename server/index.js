@@ -37,6 +37,16 @@ function parseDateParam(dateStr, defaultStr) {
   return dateStr;
 }
 
+// Helper para converter planos excluídos em lista de inteiros
+function parsePlanosExcluidos(param) {
+  if (!param) return [];
+  if (Array.isArray(param)) return param.map(Number).filter(n => !isNaN(n) && n > 0);
+  return String(param)
+    .split(',')
+    .map(s => parseInt(s.trim(), 10))
+    .filter(n => !isNaN(n) && n > 0);
+}
+
 // Retorna se deve usar banco de dados real ou mock fallback
 function isDbAvailable() {
   const status = getStatus();
@@ -52,6 +62,40 @@ app.get('/api/status', (req, res) => {
     lastCheck: status.lastCheck,
     isUsingMock: !isDbAvailable()
   });
+});
+
+// 2. Listar planos de contas cadastrados no sistema
+app.get('/api/planos-contas', async (req, res) => {
+  try {
+    if (isDbAvailable()) {
+      const pool = getPool();
+      try {
+        const [rows] = await pool.query(`
+          SELECT 
+            planocontas_id, 
+            codigo, 
+            descricao, 
+            totalizador, 
+            operacao
+          FROM planocontas
+          WHERE apagado = 'N' 
+            AND codigo IS NOT NULL 
+            AND TRIM(codigo) != ''
+          ORDER BY codigo ASC
+        `);
+        if (rows && rows.length > 0) {
+          return res.json(rows);
+        }
+      } catch (errPc) {
+        console.warn('Consulta na tabela planocontas falhou:', errPc.message);
+      }
+    }
+    // Mock
+    return res.json(planocontasMock);
+  } catch (err) {
+    console.error('Erro em /api/planos-contas:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 5. Listar filiais disponíveis
@@ -93,7 +137,8 @@ app.get('/api/filiais', async (req, res) => {
 // 6. Indicadores de Topo (Cards KPI fiéis ao layout do painel)
 app.get('/api/kpis', async (req, res) => {
   try {
-    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, criterio_caixa = 'dt_pgto' } = req.query;
+    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, planos_excluidos } = req.query;
+    const planosExcluidosList = parsePlanosExcluidos(planos_excluidos);
 
     if (isDbAvailable()) {
       const pool = getPool();
@@ -106,6 +151,12 @@ app.get('/api/kpis', async (req, res) => {
         params.push(filial_id);
       }
 
+      // Filtro de Planos de Contas Excluídos
+      if (planosExcluidosList.length > 0) {
+        whereClauses.push(`p.planocontas_id NOT IN (${planosExcluidosList.map(() => '?').join(',')})`);
+        params.push(...planosExcluidosList);
+      }
+
       // Filtro de Busca
       if (busca && busca.trim() !== '') {
         whereClauses.push('(p.historico LIKE ? OR f.nome LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
@@ -113,17 +164,16 @@ app.get('/api/kpis', async (req, res) => {
         params.push(searchParam, searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime: Competência usa dt_emissao, Caixa busca em pagar por dt_pgto (ou dtvenc pago)
+      // Filtro de Período e Regime: Competência usa dt_emissao, Caixa busca em pagar por dt_pgto
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
         whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
-        const dataColCaixa = criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)';
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push(`${dataColCaixa} >= ?`);
+          whereClauses.push('DATE(p.dt_pgto) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push(`${dataColCaixa} <= ?`);
+          whereClauses.push('DATE(p.dt_pgto) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -526,7 +576,8 @@ function generateStructuredDre(rawRows, regime, fiscalData = null, expenseRows =
 // 7. Demonstrativo DRE Estruturado
 app.get('/api/dre', async (req, res) => {
   try {
-    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, criterio_caixa = 'dt_pgto' } = req.query;
+    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, planos_excluidos } = req.query;
+    const planosExcluidosList = parsePlanosExcluidos(planos_excluidos);
 
     if (isDbAvailable()) {
       const pool = getPool();
@@ -537,23 +588,29 @@ app.get('/api/dre', async (req, res) => {
         whereClauses.push('COALESCE(p.dafilial_id, p.filial_id) = ?');
         params.push(filial_id);
       }
+
+      // Filtro de Planos de Contas Excluídos
+      if (planosExcluidosList.length > 0) {
+        whereClauses.push(`p.planocontas_id NOT IN (${planosExcluidosList.map(() => '?').join(',')})`);
+        params.push(...planosExcluidosList);
+      }
+
       if (busca && busca.trim() !== '') {
         whereClauses.push('(p.historico LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
         const searchParam = `%${busca.trim()}%`;
         params.push(searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime na DRE: Competência por dt_emissao, Caixa por dt_pgto (ou dtvenc pago)
+      // Filtro de Período e Regime na DRE: Competência por dt_emissao, Caixa por dt_pgto
       if (regime === 'caixa') {
         whereClauses.push('p.dt_pgto IS NOT NULL');
         whereClauses.push('COALESCE(p.valor_pago, 0) > 0');
-        const dataColCaixa = criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)';
         if (dt_inicio && dt_inicio.trim() !== '') {
-          whereClauses.push(`${dataColCaixa} >= ?`);
+          whereClauses.push('DATE(p.dt_pgto) >= ?');
           params.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          whereClauses.push(`${dataColCaixa} <= ?`);
+          whereClauses.push('DATE(p.dt_pgto) <= ?');
           params.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -620,7 +677,8 @@ app.get('/api/dre', async (req, res) => {
             filialId: filial_id,
             dtInicio: dt_inicio,
             dtFim: dt_fim,
-            busca
+            busca,
+            planosExcluidos: planosExcluidosList
           });
         } catch (errExp) {
           console.warn('Falha ao consultar view vw_dre_despesas_analitico:', errExp.message);
@@ -637,6 +695,9 @@ app.get('/api/dre', async (req, res) => {
     let filtered = pagarMock.filter(p => p.apagado === 'N');
     if (shouldFilterByFilial(filial_id)) {
       filtered = filtered.filter(p => p.filial_id == filial_id);
+    }
+    if (planosExcluidosList.length > 0) {
+      filtered = filtered.filter(p => !planosExcluidosList.includes(p.planocontas_id));
     }
     if (busca && busca.trim() !== '') {
       const q = busca.toLowerCase();
@@ -690,7 +751,8 @@ app.get('/api/dre', async (req, res) => {
 // 8. Gráficos (Evolução Temporal e Categorias)
 app.get('/api/graficos', async (req, res) => {
   try {
-    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, criterio_caixa = 'dt_pgto' } = req.query;
+    const { regime = 'competencia', dt_inicio, dt_fim, filial_id, busca, planos_excluidos } = req.query;
+    const planosExcluidosList = parsePlanosExcluidos(planos_excluidos);
 
     if (isDbAvailable()) {
       const pool = getPool();
@@ -701,6 +763,13 @@ app.get('/api/graficos', async (req, res) => {
         whereClauses.push('COALESCE(p.dafilial_id, p.filial_id) = ?');
         params.push(filial_id);
       }
+
+      // Filtro de Planos de Contas Excluídos
+      if (planosExcluidosList.length > 0) {
+        whereClauses.push(`p.planocontas_id NOT IN (${planosExcluidosList.map(() => '?').join(',')})`);
+        params.push(...planosExcluidosList);
+      }
+
       if (busca && busca.trim() !== '') {
         whereClauses.push('(p.historico LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
         const searchParam = `%${busca.trim()}%`;
@@ -713,7 +782,7 @@ app.get('/api/graficos', async (req, res) => {
       }
 
       const dateField = regime === 'caixa'
-        ? (criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)')
+        ? 'DATE(p.dt_pgto)'
         : 'DATE(COALESCE(p.dt_emissao, p.dtcadastro))';
       const valField = regime === 'caixa' ? 'p.valor_pago' : 'p.valor';
 
@@ -809,12 +878,13 @@ app.get('/api/lancamentos', async (req, res) => {
       busca,
       filtro_plano = 'todos',
       sem_plano,
+      planos_excluidos,
       page = 1,
       limit = 50,
-      export: isExport = 'false',
-      criterio_caixa = 'dt_pgto'
+      export: isExport = 'false'
     } = req.query;
 
+    const planosExcluidosList = parsePlanosExcluidos(planos_excluidos);
     const apenasSemPlano = filtro_plano === 'sem_plano' || sem_plano === 'true' || sem_plano === '1';
     const apenasComPlano = filtro_plano === 'com_plano';
     const isExportMode = isExport === 'true' || isExport === '1';
@@ -832,23 +902,29 @@ app.get('/api/lancamentos', async (req, res) => {
         baseWhereClauses.push('COALESCE(p.dafilial_id, p.filial_id) = ?');
         baseParams.push(filial_id);
       }
+
+      // Filtro de Planos de Contas Excluídos
+      if (planosExcluidosList.length > 0) {
+        baseWhereClauses.push(`p.planocontas_id NOT IN (${planosExcluidosList.map(() => '?').join(',')})`);
+        baseParams.push(...planosExcluidosList);
+      }
+
       if (busca && busca.trim() !== '') {
         baseWhereClauses.push('(p.historico LIKE ? OR f.nome LIKE ? OR p.nome_razao_cedente LIKE ? OR p.NF LIKE ?)');
         const searchParam = `%${busca.trim()}%`;
         baseParams.push(searchParam, searchParam, searchParam, searchParam);
       }
 
-      // Filtro de Período e Regime em Lançamentos: Competência por dt_emissao, Caixa por dt_pgto (ou dtvenc pago)
+      // Filtro de Período e Regime em Lançamentos: Competência por dt_emissao, Caixa por dt_pgto
       if (regime === 'caixa') {
         baseWhereClauses.push('p.dt_pgto IS NOT NULL');
         baseWhereClauses.push('COALESCE(p.valor_pago, 0) > 0');
-        const dataColCaixa = criterio_caixa === 'dtvenc' ? 'DATE(p.dtvenc)' : 'DATE(p.dt_pgto)';
         if (dt_inicio && dt_inicio.trim() !== '') {
-          baseWhereClauses.push(`${dataColCaixa} >= ?`);
+          baseWhereClauses.push('DATE(p.dt_pgto) >= ?');
           baseParams.push(dt_inicio.trim().split('T')[0]);
         }
         if (dt_fim && dt_fim.trim() !== '') {
-          baseWhereClauses.push(`${dataColCaixa} <= ?`);
+          baseWhereClauses.push('DATE(p.dt_pgto) <= ?');
           baseParams.push(dt_fim.trim().split('T')[0]);
         }
       } else {
@@ -948,6 +1024,9 @@ app.get('/api/lancamentos', async (req, res) => {
     let filtered = pagarMock.filter(p => p.apagado === 'N');
     if (shouldFilterByFilial(filial_id)) {
       filtered = filtered.filter(p => p.filial_id == filial_id);
+    }
+    if (planosExcluidosList.length > 0) {
+      filtered = filtered.filter(p => !planosExcluidosList.includes(p.planocontas_id));
     }
     if (busca && busca.trim() !== '') {
       const q = busca.toLowerCase();

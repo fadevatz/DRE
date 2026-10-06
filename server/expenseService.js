@@ -52,7 +52,7 @@ function mapGrupoToSection(grupoId, grupoDescricao) {
   return null;
 }
 
-async function getExpensesFromView(pool, { filialId, dtInicio, dtFim, busca = '' }) {
+async function getExpensesFromView(pool, { filialId, dtInicio, dtFim, busca = '', planosExcluidos = [] }) {
   try {
     const whereClauses = [
       // Grupos operacionais de despesas e receitas da DRE
@@ -79,6 +79,11 @@ async function getExpensesFromView(pool, { filialId, dtInicio, dtFim, busca = ''
       whereClauses.push('(v.conta_descricao LIKE ? OR v.conta_codigo LIKE ?)');
       const p = `%${busca.trim()}%`;
       params.push(p, p);
+    }
+
+    if (Array.isArray(planosExcluidos) && planosExcluidos.length > 0) {
+      whereClauses.push(`v.planocontas_id NOT IN (${planosExcluidos.map(() => '?').join(',')})`);
+      params.push(...planosExcluidos);
     }
 
     const whereSql = 'WHERE ' + whereClauses.join(' AND ');

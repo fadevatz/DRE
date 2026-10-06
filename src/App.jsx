@@ -14,12 +14,14 @@ export default function App() {
 
   // Filtros Globais
   const [regime, setRegime] = useState('competencia'); // 'competencia' ou 'caixa'
-  const [criterioCaixa, setCriterioCaixa] = useState('dt_pgto'); // 'dt_pgto' (Data Pagamento) ou 'dtvenc' (Vencimento Pago)
   const [filiais, setFiliais] = useState([]);
   const [selectedFilial, setSelectedFilial] = useState('1');
   const [dtInicio, setDtInicio] = useState('');
   const [dtFim, setDtFim] = useState('');
-  const [busca, setBusca] = useState('');
+
+  // Planos de Contas e Seleção Suspensa
+  const [planosContas, setPlanosContas] = useState([]);
+  const [planosExcluidos, setPlanosExcluidos] = useState([]); // IDs numéricos desmarcados
 
   // Filtro de Plano de Contas e exportação para Lançamentos Analíticos
   const [filtroPlano, setFiltroPlano] = useState('todos'); // 'todos' | 'sem_plano' | 'com_plano'
@@ -64,31 +66,42 @@ export default function App() {
     }
   };
 
+  // Carregar lista de planos de contas para o dropdown com seleção
+  const loadPlanosContas = async () => {
+    try {
+      const res = await fetch('/api/planos-contas');
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setPlanosContas(data);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar planos de contas:', err);
+    }
+  };
+
   // Carregar dados gerais
   const loadData = useCallback(async () => {
     setLoading(true);
     setIsRefreshing(true);
     try {
-      const baseQueryParams = new URLSearchParams({
+      const baseParamsObj = {
         regime,
         filial_id: selectedFilial,
         dt_inicio: dtInicio,
-        dt_fim: dtFim,
-        busca,
-        criterio_caixa: criterioCaixa
-      }).toString();
+        dt_fim: dtFim
+      };
+      if (planosExcluidos.length > 0) {
+        baseParamsObj.planos_excluidos = planosExcluidos.join(',');
+      }
+      const baseQueryParams = new URLSearchParams(baseParamsObj).toString();
 
-      const lancQueryParams = new URLSearchParams({
-        regime,
-        filial_id: selectedFilial,
-        dt_inicio: dtInicio,
-        dt_fim: dtFim,
-        busca,
+      const lancParamsObj = {
+        ...baseParamsObj,
         filtro_plano: filtroPlano,
-        criterio_caixa: criterioCaixa,
         page: String(page),
         limit: '50'
-      }).toString();
+      };
+      const lancQueryParams = new URLSearchParams(lancParamsObj).toString();
 
       // Buscar simultaneamente KPIs, DRE, Gráficos e Lançamentos
       const [kpiRes, dreRes, chartRes, lancRes] = await Promise.all([
@@ -119,32 +132,60 @@ export default function App() {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [regime, criterioCaixa, selectedFilial, dtInicio, dtFim, busca, filtroPlano, page]);
+  }, [regime, selectedFilial, dtInicio, dtFim, planosExcluidos, filtroPlano, page]);
 
   useEffect(() => {
     checkDbStatus();
     loadFiliais();
+    loadPlanosContas();
   }, []);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  // Alternar marcação de plano individual
+  const handleTogglePlano = (planoId) => {
+    const idNum = Number(planoId);
+    setPlanosExcluidos(prev => {
+      if (prev.includes(idNum)) {
+        return prev.filter(id => id !== idNum);
+      } else {
+        return [...prev, idNum];
+      }
+    });
+    setPage(1);
+  };
+
+  // Marcar todos os planos
+  const handleMarcarTodos = () => {
+    setPlanosExcluidos([]);
+    setPage(1);
+  };
+
+  // Desmarcar todos os planos
+  const handleDesmarcarTodos = () => {
+    setPlanosExcluidos(planosContas.map(p => Number(p.planocontas_id)));
+    setPage(1);
+  };
+
   // Exportar lançamentos analíticos filtrados para planilha Excel
   const handleExportLancamentosExcel = async () => {
     try {
       setIsExportingLancamentos(true);
-      const queryParams = new URLSearchParams({
+      const queryParamsObj = {
         regime,
         filial_id: selectedFilial,
         dt_inicio: dtInicio,
         dt_fim: dtFim,
-        busca,
         filtro_plano: filtroPlano,
-        criterio_caixa: criterioCaixa,
         export: 'true',
         limit: '50000'
-      }).toString();
+      };
+      if (planosExcluidos.length > 0) {
+        queryParamsObj.planos_excluidos = planosExcluidos.join(',');
+      }
+      const queryParams = new URLSearchParams(queryParamsObj).toString();
 
       const res = await fetch(`/api/lancamentos?${queryParams}`);
       const data = await res.json();
@@ -161,8 +202,7 @@ export default function App() {
         filialNome,
         filtroPlano,
         dtInicio,
-        dtFim,
-        busca
+        dtFim
       });
     } catch (err) {
       console.error('Erro ao exportar lançamentos para Excel:', err);
@@ -176,7 +216,7 @@ export default function App() {
     setSelectedFilial('1');
     setDtInicio('');
     setDtFim('');
-    setBusca('');
+    setPlanosExcluidos([]);
     setFiltroPlano('todos');
     setPage(1);
   };
@@ -197,7 +237,7 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
 
-        {/* 2. Filtros de Análise (Exatamente como o card da foto) */}
+        {/* 2. Filtros de Análise */}
         <FilterBar
           filiais={filiais}
           selectedFilial={selectedFilial}
@@ -206,15 +246,6 @@ export default function App() {
             setPage(1);
           }}
           regime={regime}
-          onChangeRegime={(r) => {
-            setRegime(r);
-            setPage(1);
-          }}
-          criterioCaixa={criterioCaixa}
-          onChangeCriterioCaixa={(c) => {
-            setCriterioCaixa(c);
-            setPage(1);
-          }}
           dtInicio={dtInicio}
           onChangeDtInicio={(d) => {
             setDtInicio(d);
@@ -225,15 +256,11 @@ export default function App() {
             setDtFim(d);
             setPage(1);
           }}
-          busca={busca}
-          onChangeBusca={(b) => {
-            setBusca(b);
-            setPage(1);
-          }}
-          onClearBusca={() => {
-            setBusca('');
-            setPage(1);
-          }}
+          planosContas={planosContas}
+          planosExcluidos={planosExcluidos}
+          onTogglePlano={handleTogglePlano}
+          onMarcarTodos={handleMarcarTodos}
+          onDesmarcarTodos={handleDesmarcarTodos}
           onApplyFilters={loadData}
           onSelectPeriod={(ini, fim) => {
             setDtInicio(ini);
@@ -244,7 +271,7 @@ export default function App() {
           loading={loading}
         />
 
-        {/* 3. 4 Cards de Métricas / KPIs (Layout Idêntico à Foto) */}
+        {/* 3. 4 Cards de Métricas / KPIs */}
         <KpiCards kpis={kpis} regime={regime} />
 
         {/* 4. Barra de Navegação de Módulos / Abas */}
@@ -327,4 +354,3 @@ export default function App() {
     </div>
   );
 }
-
