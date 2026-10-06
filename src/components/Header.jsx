@@ -19,14 +19,6 @@ export default function Header({ dbStatus, onOpenDbModal, onRefresh, isRefreshin
             <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">
               Painel Financeiro &amp; DRE
             </h1>
-            {/* Regime Badge Toggle Rápido */}
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
-              regime === 'competencia'
-                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-            }`}>
-              Regime de {regime === 'competencia' ? 'Competência' : 'Caixa'}
-            </span>
           </div>
         </div>
       </div>
