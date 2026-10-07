@@ -5,10 +5,24 @@ import KpiCards from './components/KpiCards';
 import DreTable from './components/DreTable';
 import ChartsView from './components/ChartsView';
 import LancamentosTable from './components/LancamentosTable';
+import LoginScreen from './components/LoginScreen';
 import { exportLancamentosToExcel } from './utils/excelExporter';
-import { Layers, LineChart, FileText } from 'lucide-react';
+import { Layers, LineChart, FileText, Loader2 } from 'lucide-react';
+import logoLogin from './assets/logo-login.png';
 
 export default function App() {
+  // Estado de Autenticação Segura
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      const u = localStorage.getItem('auth_user');
+      return u ? JSON.parse(u) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isVerifyingAuth, setIsVerifyingAuth] = useState(true);
+
   // Estado de conexão com banco
   const [dbStatus, setDbStatus] = useState({ connected: false, message: 'Verificando...' });
 
@@ -42,8 +56,58 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Helper para requisições autenticadas com injeção automática de Bearer token
+  const authFetch = useCallback(async (url, options = {}) => {
+    const token = localStorage.getItem('auth_token');
+    const headers = {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    };
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+      // Token expirou ou é inválido
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      setAuthToken(null);
+      setAuthUser(null);
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
+    return res;
+  }, []);
+
+  // Verificar validade do token ao abrir a aplicação
+  useEffect(() => {
+    async function verifySession() {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        setIsVerifyingAuth(false);
+        return;
+      }
+      try {
+        const res = await fetch('/api/auth/verify', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.valid) {
+          setAuthToken(token);
+          setAuthUser(data.user || { name: 'Administrador' });
+        } else {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+          setAuthToken(null);
+          setAuthUser(null);
+        }
+      } catch (err) {
+        console.warn('Erro ao checar autenticação:', err);
+      } finally {
+        setIsVerifyingAuth(false);
+      }
+    }
+    verifySession();
+  }, []);
+
   // Carregar status do banco
-  const checkDbStatus = async () => {
+  const checkDbStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/status');
       const data = await res.json();
@@ -51,12 +115,13 @@ export default function App() {
     } catch (err) {
       setDbStatus({ connected: false, message: 'Servidor offline' });
     }
-  };
+  }, []);
 
   // Carregar lista de filiais
-  const loadFiliais = async () => {
+  const loadFiliais = useCallback(async () => {
+    if (!authToken) return;
     try {
-      const res = await fetch('/api/filiais');
+      const res = await authFetch('/api/filiais');
       const data = await res.json();
       if (Array.isArray(data)) {
         setFiliais(data);
@@ -64,12 +129,13 @@ export default function App() {
     } catch (err) {
       console.error('Erro ao carregar filiais:', err);
     }
-  };
+  }, [authToken, authFetch]);
 
   // Carregar lista de planos de contas para o dropdown com seleção
-  const loadPlanosContas = async () => {
+  const loadPlanosContas = useCallback(async () => {
+    if (!authToken) return;
     try {
-      const res = await fetch('/api/planos-contas');
+      const res = await authFetch('/api/planos-contas');
       const data = await res.json();
       if (Array.isArray(data)) {
         setPlanosContas(data);
@@ -77,10 +143,11 @@ export default function App() {
     } catch (err) {
       console.error('Erro ao carregar planos de contas:', err);
     }
-  };
+  }, [authToken, authFetch]);
 
   // Carregar dados gerais
   const loadData = useCallback(async () => {
+    if (!authToken) return;
     setLoading(true);
     setIsRefreshing(true);
     try {
@@ -103,12 +170,12 @@ export default function App() {
       };
       const lancQueryParams = new URLSearchParams(lancParamsObj).toString();
 
-      // Buscar simultaneamente KPIs, DRE, Gráficos e Lançamentos
+      // Buscar simultaneamente KPIs, DRE, Gráficos e Lançamentos com autenticação
       const [kpiRes, dreRes, chartRes, lancRes] = await Promise.all([
-        fetch(`/api/kpis?${baseQueryParams}`),
-        fetch(`/api/dre?${baseQueryParams}`),
-        fetch(`/api/graficos?${baseQueryParams}`),
-        fetch(`/api/lancamentos?${lancQueryParams}`)
+        authFetch(`/api/kpis?${baseQueryParams}`),
+        authFetch(`/api/dre?${baseQueryParams}`),
+        authFetch(`/api/graficos?${baseQueryParams}`),
+        authFetch(`/api/lancamentos?${lancQueryParams}`)
       ]);
 
       const [kpiJson, dreJson, chartJson, lancJson] = await Promise.all([
@@ -132,17 +199,31 @@ export default function App() {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [regime, selectedFilial, dtInicio, dtFim, planosExcluidos, filtroPlano, page]);
+  }, [authToken, authFetch, regime, selectedFilial, dtInicio, dtFim, planosExcluidos, filtroPlano, page]);
 
   useEffect(() => {
-    checkDbStatus();
-    loadFiliais();
-    loadPlanosContas();
-  }, []);
+    if (authToken) {
+      checkDbStatus();
+      loadFiliais();
+      loadPlanosContas();
+      loadData();
+    }
+  }, [authToken, checkDbStatus, loadFiliais, loadPlanosContas, loadData]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Callback de login bem-sucedido
+  const handleLoginSuccess = (token, user) => {
+    setAuthToken(token);
+    setAuthUser(user);
+    setPage(1);
+  };
+
+  // Callback de logout
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    setAuthToken(null);
+    setAuthUser(null);
+  };
 
   // Alternar marcação de plano individual
   const handleTogglePlano = (planoId) => {
@@ -187,7 +268,7 @@ export default function App() {
       }
       const queryParams = new URLSearchParams(queryParamsObj).toString();
 
-      const res = await fetch(`/api/lancamentos?${queryParams}`);
+      const res = await authFetch(`/api/lancamentos?${queryParams}`);
       const data = await res.json();
       const recordsToExport = data.records || lancamentos;
 
@@ -221,9 +302,30 @@ export default function App() {
     setPage(1);
   };
 
+  // 1. Tela de carregamento enquanto valida a sessão salva
+  if (isVerifyingAuth) {
+    return (
+      <div className="min-h-screen bg-[#1b3a35] flex flex-col items-center justify-center p-4">
+        <div className="w-20 h-20 rounded-2xl overflow-hidden bg-[#42b39f] p-1 shadow-xl mb-4 animate-pulse flex items-center justify-center">
+          <img src={logoLogin} alt="Drogaria SC" className="w-full h-full object-contain" />
+        </div>
+        <div className="flex items-center gap-2 text-white/90 text-sm font-semibold">
+          <Loader2 className="w-5 h-5 animate-spin text-[#42b39f]" />
+          <span>Verificando credenciais seguras...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Se não estiver autenticado, renderiza a Tela de Login
+  if (!authToken) {
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // 3. Painel Principal com Acesso Autorizado
   return (
     <div className="min-h-screen bg-[#f3f6fa] pb-16">
-      {/* 1. Header com alternância de regime e ícone informativo */}
+      {/* 1. Header com alternância de regime, botão Sair e ícone informativo */}
       <Header
         dbStatus={dbStatus}
         onRefresh={loadData}
@@ -233,6 +335,8 @@ export default function App() {
           setRegime(r);
           setPage(1);
         }}
+        user={authUser}
+        onLogout={handleLogout}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">

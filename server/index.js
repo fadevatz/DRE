@@ -7,6 +7,7 @@ const { planocontasMock, pagarMock, filiaisMock } = require('./mockData');
 const { DRE_STRUCTURE, classifyAccount } = require('./dreClassifier');
 const { getFiscalRevenueAndCmv } = require('./revenueService');
 const { getExpensesFromView, mapGrupoToSection } = require('./expenseService');
+const { validateCredentials, generateToken, verifyToken, requireAuth } = require('./auth');
 
 // Regra de Negócio: filial_id 1 - Escritorio vê informações de todas as lojas
 function shouldFilterByFilial(filialId) {
@@ -30,6 +31,64 @@ app.use('/api', (req, res, next) => {
   console.log(`[API ${new Date().toLocaleTimeString('pt-BR')}] ${req.method} ${req.url}`);
   next();
 });
+
+// 0. Autenticação: Login seguro
+app.post('/api/login', (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Por favor, informe usuário e senha.'
+      });
+    }
+
+    const isValid = validateCredentials(username, password);
+    if (!isValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Usuário ou senha incorretos. Verifique suas credenciais.'
+      });
+    }
+
+    const token = generateToken(username);
+    return res.json({
+      success: true,
+      message: 'Autenticado com sucesso!',
+      token,
+      user: {
+        name: 'Administrador',
+        username: 'Administrador'
+      }
+    });
+  } catch (err) {
+    console.error('Erro no login:', err);
+    res.status(500).json({ success: false, message: 'Erro interno ao autenticar.' });
+  }
+});
+
+// 0.1 Verificar validade da sessão atual
+app.get('/api/auth/verify', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.json({ valid: false });
+  }
+  const token = authHeader.substring(7).trim();
+  const decoded = verifyToken(token);
+  if (!decoded) {
+    return res.json({ valid: false });
+  }
+  return res.json({
+    valid: true,
+    user: {
+      name: 'Administrador',
+      username: decoded.username
+    }
+  });
+});
+
+// Proteger todas as demais rotas da API com requireAuth
+app.use('/api', requireAuth);
 
 // Helper para tratar datas em string YYYY-MM-DD
 function parseDateParam(dateStr, defaultStr) {

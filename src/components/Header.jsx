@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Info, RefreshCw, X } from 'lucide-react';
+import { Info, RefreshCw, X, LogOut, User } from 'lucide-react';
 import logoDrogaria from '../assets/logo-drogaria-sc.png';
 
-export default function Header({ dbStatus, onRefresh, isRefreshing, regime, onToggleRegime }) {
+export default function Header({ dbStatus, onRefresh, isRefreshing, regime, onToggleRegime, user, onLogout }) {
   const [showInfo, setShowInfo] = useState(false);
   const infoRef = useRef(null);
 
@@ -137,6 +137,19 @@ export default function Header({ dbStatus, onRefresh, isRefreshing, regime, onTo
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
           <span className="hidden sm:inline">Atualizar</span>
         </button>
+
+        {/* Botão Sair / Logout */}
+        {onLogout && (
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100/80 active:bg-rose-200/80 text-rose-700 px-3 py-2 rounded-xl text-xs font-semibold transition-all border border-rose-200 shadow-2xs cursor-pointer"
+            title="Sair da sessão e retornar à tela de login"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Sair</span>
+          </button>
+        )}
       </div>
     </header>
   );
