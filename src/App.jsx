@@ -28,7 +28,7 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState({ connected: false, message: 'Verificando...' });
 
   // Filtros Globais
-  const [regime, setRegime] = useState('competencia'); // 'competencia' ou 'caixa'
+  const [regime, setRegime] = useState('caixa'); // 'caixa' (padrão) ou 'competencia'
   const [filiais, setFiliais] = useState([]);
   const [selectedFilial, setSelectedFilial] = useState('1');
   const [dtInicio, setDtInicio] = useState('');
@@ -178,6 +178,16 @@ export default function App() {
   // Carregar dados gerais
   const loadData = useCallback(async () => {
     if (!authToken) return;
+    if (!dtInicio || !dtFim) {
+      setKpis(null);
+      setDreData(null);
+      setChartData(null);
+      setLancamentos([]);
+      setTotalLancamentos(0);
+      setLancamentosCounts({ total: 0, semPlano: 0, comPlano: 0 });
+      return;
+    }
+
     setLoading(true);
     setIsRefreshing(true);
     try {
@@ -239,9 +249,11 @@ export default function App() {
       checkDbStatus();
       loadFiliais();
       loadPlanosContas();
-      loadData();
+      if (dtInicio && dtFim) {
+        loadData();
+      }
     }
-  }, [authToken, checkDbStatus, loadFiliais, loadPlanosContas, loadData]);
+  }, [authToken, checkDbStatus, loadFiliais, loadPlanosContas, loadData, dtInicio, dtFim]);
 
   // Callback de login bem-sucedido
   const handleLoginSuccess = (token, user) => {
@@ -496,50 +508,92 @@ export default function App() {
         </div>
 
         {/* 5. Conteúdo da Aba Selecionada */}
-        {mainTab === 'dre' && (
-          <DreTable dreData={dreData} regime={regime} />
-        )}
+        {mainTab !== 'dre_mensal' && (!dtInicio || !dtFim) ? (
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-8 shadow-xs text-center max-w-xl mx-auto my-8">
+            <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-blue-100">
+              <CalendarDays className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">
+              Selecione o Período para Análise
+            </h3>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              Para gerar os indicadores, demonstrativo e lançamentos analíticos, informe a <strong>Data Inicial</strong> e <strong>Data Final</strong> nos filtros acima ou escolha um atalho:
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setDtInicio('2026-01-01');
+                  setDtFim('2026-12-31');
+                  setAnoDreMensal(2026);
+                  setPage(1);
+                }}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95 flex items-center gap-2"
+              >
+                <span>📅 Analisar Ano 2026</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDtInicio('2025-01-01');
+                  setDtFim('2025-12-31');
+                  setAnoDreMensal(2025);
+                  setPage(1);
+                }}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+              >
+                <span>📅 Analisar Ano 2025</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {mainTab === 'dre' && (
+              <DreTable dreData={dreData} regime={regime} />
+            )}
 
-        {mainTab === 'dre_mensal' && (
-          <DreMensalTable
-            dreMensalData={dreMensalData}
-            ano={anoDreMensal}
-            onChangeAno={(novoAno) => {
-              setAnoDreMensal(novoAno);
-              loadDreMensal(novoAno);
-            }}
-            regime={regime}
-            loading={loadingDreMensal}
-            onExportExcel={handleExportDreMensalExcel}
-          />
-        )}
+            {mainTab === 'dre_mensal' && (
+              <DreMensalTable
+                dreMensalData={dreMensalData}
+                ano={anoDreMensal}
+                onChangeAno={(novoAno) => {
+                  setAnoDreMensal(novoAno);
+                  loadDreMensal(novoAno);
+                }}
+                regime={regime}
+                loading={loadingDreMensal}
+                onExportExcel={handleExportDreMensalExcel}
+              />
+            )}
 
-        {mainTab === 'graficos' && (
-          <ChartsView
-            chartData={chartData}
-            activeTab={chartSubTab}
-            onTabChange={setChartSubTab}
-            regime={regime}
-          />
-        )}
+            {mainTab === 'graficos' && (
+              <ChartsView
+                chartData={chartData}
+                activeTab={chartSubTab}
+                onTabChange={setChartSubTab}
+                regime={regime}
+              />
+            )}
 
-        {mainTab === 'lancamentos' && (
-          <LancamentosTable
-            lancamentos={lancamentos}
-            totalRecords={totalLancamentos}
-            counts={lancamentosCounts}
-            filtroPlano={filtroPlano}
-            onFiltroPlanoChange={(novoFiltro) => {
-              setFiltroPlano(novoFiltro);
-              setPage(1);
-            }}
-            page={page}
-            limit={50}
-            onPageChange={setPage}
-            regime={regime}
-            onExportExcel={handleExportLancamentosExcel}
-            isExporting={isExportingLancamentos}
-          />
+            {mainTab === 'lancamentos' && (
+              <LancamentosTable
+                lancamentos={lancamentos}
+                totalRecords={totalLancamentos}
+                counts={lancamentosCounts}
+                filtroPlano={filtroPlano}
+                onFiltroPlanoChange={(novoFiltro) => {
+                  setFiltroPlano(novoFiltro);
+                  setPage(1);
+                }}
+                page={page}
+                limit={50}
+                onPageChange={setPage}
+                regime={regime}
+                onExportExcel={handleExportLancamentosExcel}
+                isExporting={isExportingLancamentos}
+              />
+            )}
+          </>
         )}
       </main>
     </div>

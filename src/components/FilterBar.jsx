@@ -94,17 +94,6 @@ export default function FilterBar({
           >
             Ano 2025
           </button>
-          <button
-            type="button"
-            onClick={() => onSelectPeriod && onSelectPeriod('', '')}
-            className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
-              !dtInicio && !dtFim
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            Todo o Histórico
-          </button>
         </div>
       </div>
 

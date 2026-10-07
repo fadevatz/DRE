@@ -194,7 +194,24 @@ async function getMonthlyDreData(pool, { ano = 2026, regime = 'competencia', fil
           const mIdx = Number(row.mes) - 1;
           if (mIdx < 0 || mIdx > 11) return;
           const val = Number(row.total || 0);
-          const gKey = mapGrupoToKey(row.grupo_id, row.grupo_descricao);
+
+          // REGRA DE NEGÓCIO CONTÁBIL:
+          // Contas do grupo 2.02 (Impostos sobre Vendas / DAS / ICMS / ISS) já são apuradas
+          // na Seção de Deduções e Abatimentos da Receita Bruta.
+          // NÃO DEVEM ser duplicadas dentro de Despesas Operacionais (Comerciais, Administrativas, Outras Despesas).
+          if (
+            String(row.conta_codigo || '').startsWith('2.02.') ||
+            row.planocontas_id === 32 ||
+            (row.conta_descricao && row.conta_descricao.toUpperCase().includes('DAS SIMPLES'))
+          ) {
+            return;
+          }
+
+          let gKey = mapGrupoToKey(row.grupo_id, row.grupo_descricao);
+          if (row.conta_codigo === '2.01.001' || row.conta_codigo === '2.01.002') {
+            gKey = 'comerciais';
+          }
+
           const contaLabel = row.conta_formatada || `${row.conta_codigo || 'S/C'} - ${row.conta_descricao || 'Outros'}`;
 
           if (grupos[gKey]) {
@@ -257,10 +274,23 @@ async function getMonthlyDreData(pool, { ano = 2026, regime = 'competencia', fil
           if (mIdx < 0 || mIdx > 11) return;
           const val = Number(row.total || 0);
 
+          // REGRA DE NEGÓCIO CONTÁBIL:
+          // Contas do grupo 2.02 (Impostos sobre Vendas / DAS / ICMS / ISS) já são apuradas
+          // na Seção de Deduções e Abatimentos da Receita Bruta.
+          // NÃO DEVEM ser duplicadas dentro de Despesas Operacionais (Comerciais, Administrativas, Outras Despesas).
+          if (
+            String(row.conta_codigo || '').startsWith('2.02.') ||
+            row.planocontas_id === 32 ||
+            (row.conta_descricao && row.conta_descricao.toUpperCase().includes('DAS SIMPLES'))
+          ) {
+            return;
+          }
+
           let gKey = 'outras_despesas';
           if (row.grupo_id) {
             gKey = mapGrupoToKey(row.grupo_id, row.grupo_descricao);
-          } else if (row.conta_codigo === '2.01.001') {
+          }
+          if (row.conta_codigo === '2.01.001' || row.conta_codigo === '2.01.002') {
             gKey = 'comerciais';
           }
 
@@ -439,3 +469,4 @@ async function getMonthlyDreData(pool, { ano = 2026, regime = 'competencia', fil
 module.exports = {
   getMonthlyDreData
 };
+
