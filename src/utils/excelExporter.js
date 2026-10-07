@@ -590,3 +590,169 @@ export async function exportLancamentosToExcel({
   window.URL.revokeObjectURL(url);
 }
 
+/**
+ * Exporta o DRE Mês a Mês (Visão 12 Meses) exatamente no layout da planilha contábil da Drogaria SC
+ */
+export async function exportDreMensalToExcel({ dreMensalData, ano, regime, filialNome }) {
+  if (!dreMensalData || !dreMensalData.linhas || dreMensalData.linhas.length === 0) return;
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Drogaria SC - Sistema Financeiro';
+  workbook.lastModifiedBy = 'Administrador';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const anoStr = String(ano || 2026);
+  const regimeNome = regime === 'caixa' ? 'Caixa' : 'Competência';
+  const dataHojeStr = new Date().toLocaleDateString('pt-BR');
+  const horaHojeStr = new Date().toLocaleTimeString('pt-BR');
+  const sheetName = `DRE_MENSAL_${anoStr}`;
+
+  const worksheet = workbook.addWorksheet(sheetName, {
+    views: [{ showGridLines: true }]
+  });
+
+  // Configuração das colunas: Descrição + 12 Meses + Total Acumulado
+  worksheet.columns = [
+    { key: 'descricao', width: 46 },
+    { key: 'm1', width: 14 },
+    { key: 'm2', width: 14 },
+    { key: 'm3', width: 14 },
+    { key: 'm4', width: 14 },
+    { key: 'm5', width: 14 },
+    { key: 'm6', width: 14 },
+    { key: 'm7', width: 14 },
+    { key: 'm8', width: 14 },
+    { key: 'm9', width: 14 },
+    { key: 'm10', width: 14 },
+    { key: 'm11', width: 14 },
+    { key: 'm12', width: 14 },
+    { key: 'total', width: 17 }
+  ];
+
+  // 1. BANNER INSTITUCIONAL
+  worksheet.mergeCells('A1:N1');
+  const titleRow1 = worksheet.getCell('A1');
+  titleRow1.value = 'DROGARIA SC • SOMOS CUIDADO';
+  titleRow1.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleRow1.alignment = { vertical: 'middle', horizontal: 'center' };
+  titleRow1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF369C86' } };
+  worksheet.getRow(1).height = 30;
+
+  // 2. SUBTÍTULO
+  worksheet.mergeCells('A2:N2');
+  const titleRow2 = worksheet.getCell('A2');
+  titleRow2.value = `DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO (DRE) • MÊS A MÊS - ANO ${anoStr} • REGIME DE ${regimeNome.toUpperCase()}`;
+  titleRow2.font = { name: 'Calibri', size: 11.5, bold: true, color: { argb: 'FF1E293B' } };
+  titleRow2.alignment = { vertical: 'middle', horizontal: 'center' };
+  titleRow2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+  worksheet.getRow(2).height = 24;
+
+  // 3. METADADOS
+  worksheet.mergeCells('A3:N3');
+  const metaRow = worksheet.getCell('A3');
+  metaRow.value = `Filial: ${filialNome || 'Todas as Lojas'} | Exercício: ${anoStr} | Emitido em: ${dataHojeStr} às ${horaHojeStr}`;
+  metaRow.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF64748B' } };
+  metaRow.alignment = { vertical: 'middle', horizontal: 'center' };
+  worksheet.getRow(3).height = 18;
+
+  worksheet.getRow(4).height = 8; // Linha em branco
+
+  // 4. CABEÇALHO DA TABELA
+  const mesesAbrev = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  const headerCols = ['DESCRIÇÃO DA CONTA', ...mesesAbrev.map(m => `${m}/${anoStr}`), 'TOTAL ANO'];
+
+  const headerRow = worksheet.getRow(5);
+  headerRow.values = headerCols;
+  headerRow.height = 26;
+  headerRow.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  headerRow.alignment = { vertical: 'middle' };
+
+  headerRow.eachCell((cell, colNumber) => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    if (colNumber === 1) {
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    } else {
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+    }
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'medium', color: { argb: 'FF94A3B8' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+    };
+  });
+
+  // 5. LINHAS DE DADOS DO DRE MÊS A MÊS
+  let currentRowIdx = 6;
+  const numFormat = '#,##0.00;[Red](#,##0.00);0.00';
+
+  dreMensalData.linhas.forEach((linha) => {
+    const r = worksheet.getRow(currentRowIdx);
+    const valoresMeses = Array.isArray(linha.meses) ? linha.meses : new Array(12).fill(0);
+
+    const descFormatada = linha.tipo === 'analitico' ? `    ${linha.titulo}` : linha.titulo;
+    r.values = [descFormatada, ...valoresMeses, linha.totalAno];
+    r.height = linha.isSubtotal ? 24 : linha.tipo === 'grupo' ? 22 : 19;
+
+    const isHeaderGrupo = linha.tipo === 'grupo';
+    const isSubtotal = linha.isSubtotal;
+    const isResultadoFinal = linha.id === 'resultado_liquido';
+
+    r.eachCell((cell, colNumber) => {
+      // Formatação numérica nas colunas de valores
+      if (colNumber > 1) {
+        cell.numFmt = numFormat;
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      } else {
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      }
+
+      // Estilos visuais idênticos à planilha enviada
+      if (isResultadoFinal) {
+        cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF0F172A' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCBD5E1' } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF0F172A' } },
+          bottom: { style: 'double', color: { argb: 'FF0F172A' } }
+        };
+      } else if (isSubtotal) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          bottom: { style: 'thin', color: { argb: 'FF94A3B8' } }
+        };
+      } else if (isHeaderGrupo) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1E293B' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+      } else {
+        // Analítico
+        cell.font = { name: 'Calibri', size: 9.5, italic: true, color: { argb: 'FF334155' } };
+        cell.border = {
+          bottom: { style: 'dotted', color: { argb: 'FFE2E8F0' } }
+        };
+      }
+    });
+
+    currentRowIdx++;
+  });
+
+  // Download do arquivo XLSX
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `DRE_Mes_a_Mes_Drogaria_SC_${anoStr}_${new Date().toISOString().split('T')[0]}.xlsx`;
+  anchor.click();
+  window.URL.revokeObjectURL(url);
+}
+
+

@@ -74,6 +74,17 @@ export default function FilterBar({
           <span className="text-slate-400 font-medium mr-1 text-[11px]">Atalhos:</span>
           <button
             type="button"
+            onClick={() => onSelectPeriod && onSelectPeriod('2026-01-01', '2026-12-31')}
+            className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
+              dtInicio === '2026-01-01' && dtFim === '2026-12-31'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Ano 2026
+          </button>
+          <button
+            type="button"
             onClick={() => onSelectPeriod && onSelectPeriod('2025-01-01', '2025-12-31')}
             className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
               dtInicio === '2025-01-01' && dtFim === '2025-12-31'
@@ -82,17 +93,6 @@ export default function FilterBar({
             }`}
           >
             Ano 2025
-          </button>
-          <button
-            type="button"
-            onClick={() => onSelectPeriod && onSelectPeriod('2024-01-01', '2024-12-31')}
-            className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
-              dtInicio === '2024-01-01' && dtFim === '2024-12-31'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            Ano 2024
           </button>
           <button
             type="button"

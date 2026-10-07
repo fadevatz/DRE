@@ -8,6 +8,7 @@ const { DRE_STRUCTURE, classifyAccount } = require('./dreClassifier');
 const { getFiscalRevenueAndCmv } = require('./revenueService');
 const { getExpensesFromView, mapGrupoToSection } = require('./expenseService');
 const { validateCredentials, generateToken, verifyToken, requireAuth } = require('./auth');
+const { getMonthlyDreData } = require('./monthlyDreService');
 
 // Regra de Negócio: filial_id 1 - Escritorio vê informações de todas as lojas
 function shouldFilterByFilial(filialId) {
@@ -807,6 +808,27 @@ app.get('/api/dre', async (req, res) => {
   }
 });
 
+// 7.1 Demonstrativo DRE Mês a Mês (Visão Anual em 12 Meses)
+app.get('/api/dre-mensal', async (req, res) => {
+  try {
+    const { ano = 2026, regime = 'competencia', filial_id, planos_excluidos } = req.query;
+    const planosExcluidosList = parsePlanosExcluidos(planos_excluidos);
+    const pool = isDbAvailable() ? getPool() : null;
+
+    const data = await getMonthlyDreData(pool, {
+      ano,
+      regime,
+      filialId: filial_id,
+      planosExcluidos: planosExcluidosList
+    });
+
+    res.json(data);
+  } catch (err) {
+    console.error('Erro em /api/dre-mensal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 8. Gráficos (Evolução Temporal e Categorias)
 app.get('/api/graficos', async (req, res) => {
   try {
@@ -871,17 +893,57 @@ app.get('/api/graficos', async (req, res) => {
       `, params);
 
       // Distribuição por Plano de Contas
-      const [distRows] = await pool.query(`
-        SELECT 
-          COALESCE(pc.descricao, 'Outros') as categoria,
-          SUM(COALESCE(${valField}, 0)) as total_valor
-        FROM pagar p
-        LEFT JOIN planocontas pc ON p.planocontas_id = pc.planocontas_id
-        ${whereSql}
-        GROUP BY COALESCE(pc.descricao, 'Outros')
-        ORDER BY total_valor DESC
-        LIMIT 8
-      `, params);
+      let distRows = [];
+      if (regime === 'competencia') {
+        try {
+          let viewWhere = ['v.grupo_id IN (6, 7, 8, 9, 10, 12, 13, 15)'];
+          let viewParams = [];
+          if (shouldFilterByFilial(filial_id)) {
+            viewWhere.push('v.filial_id = ?');
+            viewParams.push(filial_id);
+          }
+          if (dt_inicio && dt_inicio.trim() !== '') {
+            viewWhere.push('v.data_movimento >= ?');
+            viewParams.push(dt_inicio.trim().split('T')[0]);
+          }
+          if (dt_fim && dt_fim.trim() !== '') {
+            viewWhere.push('v.data_movimento <= ?');
+            viewParams.push(dt_fim.trim().split('T')[0]);
+          }
+          if (planosExcluidosList.length > 0) {
+            viewWhere.push(`v.planocontas_id NOT IN (${planosExcluidosList.map(() => '?').join(',')})`);
+            viewParams.push(...planosExcluidosList);
+          }
+          const [viewDist] = await pool.query(`
+            SELECT 
+              v.conta_formatada as categoria,
+              SUM(v.valor) as total_valor
+            FROM vw_dre_despesas_analitico v
+            WHERE ${viewWhere.join(' AND ')}
+            GROUP BY v.planocontas_id, v.conta_formatada
+            ORDER BY total_valor DESC
+            LIMIT 10
+          `, viewParams);
+          distRows = viewDist;
+        } catch (errDistView) {
+          console.warn('Fallback em pagar para distRows:', errDistView.message);
+        }
+      }
+
+      if (!distRows || distRows.length === 0) {
+        const [fallbackDist] = await pool.query(`
+          SELECT 
+            CONCAT(COALESCE(pc.codigo, 'S/C'), ' - ', COALESCE(pc.descricao, 'Outros')) as categoria,
+            SUM(COALESCE(${valField}, 0)) as total_valor
+          FROM pagar p
+          LEFT JOIN planocontas pc ON p.planocontas_id = pc.planocontas_id
+          ${whereSql}
+          GROUP BY pc.planocontas_id, pc.codigo, pc.descricao
+          ORDER BY total_valor DESC
+          LIMIT 10
+        `, params);
+        distRows = fallbackDist;
+      }
 
       return res.json({
         timeline: timelineRows.map(r => ({

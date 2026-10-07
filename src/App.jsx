@@ -3,11 +3,12 @@ import Header from './components/Header';
 import FilterBar from './components/FilterBar';
 import KpiCards from './components/KpiCards';
 import DreTable from './components/DreTable';
+import DreMensalTable from './components/DreMensalTable';
 import ChartsView from './components/ChartsView';
 import LancamentosTable from './components/LancamentosTable';
 import LoginScreen from './components/LoginScreen';
-import { exportLancamentosToExcel } from './utils/excelExporter';
-import { Layers, LineChart, FileText, Loader2 } from 'lucide-react';
+import { exportLancamentosToExcel, exportDreMensalToExcel } from './utils/excelExporter';
+import { Layers, LineChart, FileText, CalendarDays, Loader2 } from 'lucide-react';
 import logoLogin from './assets/logo-login.png';
 
 export default function App() {
@@ -50,8 +51,13 @@ export default function App() {
   const [totalLancamentos, setTotalLancamentos] = useState(0);
   const [page, setPage] = useState(1);
 
+  // DRE Mês a Mês
+  const [anoDreMensal, setAnoDreMensal] = useState(2026);
+  const [dreMensalData, setDreMensalData] = useState(null);
+  const [loadingDreMensal, setLoadingDreMensal] = useState(false);
+
   // Estados de navegação interna
-  const [mainTab, setMainTab] = useState('dre'); // 'dre' | 'graficos' | 'lancamentos'
+  const [mainTab, setMainTab] = useState('dre'); // 'dre' | 'dre_mensal' | 'graficos' | 'lancamentos'
   const [chartSubTab, setChartSubTab] = useState('tendencia'); // 'tendencia' | 'distribuicao'
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -145,6 +151,30 @@ export default function App() {
     }
   }, [authToken, authFetch]);
 
+  // Carregar DRE Mês a Mês (Visão 12 meses)
+  const loadDreMensal = useCallback(async (anoAlvo) => {
+    if (!authToken) return;
+    const y = anoAlvo || anoDreMensal;
+    setLoadingDreMensal(true);
+    try {
+      const paramsObj = {
+        ano: String(y),
+        regime,
+        filial_id: selectedFilial
+      };
+      if (planosExcluidos.length > 0) {
+        paramsObj.planos_excluidos = planosExcluidos.join(',');
+      }
+      const res = await authFetch(`/api/dre-mensal?${new URLSearchParams(paramsObj).toString()}`);
+      const json = await res.json();
+      setDreMensalData(json);
+    } catch (err) {
+      console.error('Erro ao carregar DRE Mês a Mês:', err);
+    } finally {
+      setLoadingDreMensal(false);
+    }
+  }, [authToken, authFetch, anoDreMensal, regime, selectedFilial, planosExcluidos]);
+
   // Carregar dados gerais
   const loadData = useCallback(async () => {
     if (!authToken) return;
@@ -193,13 +223,16 @@ export default function App() {
       if (lancJson.counts) {
         setLancamentosCounts(lancJson.counts);
       }
+
+      // Também atualiza o DRE mês a mês
+      loadDreMensal();
     } catch (err) {
       console.error('Erro ao buscar dados:', err);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [authToken, authFetch, regime, selectedFilial, dtInicio, dtFim, planosExcluidos, filtroPlano, page]);
+  }, [authToken, authFetch, regime, selectedFilial, dtInicio, dtFim, planosExcluidos, filtroPlano, page, loadDreMensal]);
 
   useEffect(() => {
     if (authToken) {
@@ -293,6 +326,26 @@ export default function App() {
     }
   };
 
+  // Exportar DRE Mês a Mês para planilha Excel
+  const handleExportDreMensalExcel = async () => {
+    try {
+      const fObj = filiais.find(f => (typeof f === 'object' ? String(f.filial_id) : String(f)) === String(selectedFilial));
+      const filialNome = fObj
+        ? `${selectedFilial} - ${fObj.nome || (selectedFilial === '1' ? 'Escritório (Todas as Lojas)' : `Filial #${selectedFilial}`)}`
+        : (selectedFilial === '1' ? '1 - Escritório (Todas as Lojas)' : `Filial #${selectedFilial}`);
+
+      await exportDreMensalToExcel({
+        dreMensalData,
+        ano: anoDreMensal,
+        regime,
+        filialNome
+      });
+    } catch (err) {
+      console.error('Erro ao exportar DRE Mês a Mês para Excel:', err);
+      alert('Falha ao exportar DRE Mês a Mês: ' + err.message);
+    }
+  };
+
   const handleResetFilters = () => {
     setSelectedFilial('1');
     setDtInicio('');
@@ -370,6 +423,8 @@ export default function App() {
             setDtInicio(ini);
             setDtFim(fim);
             setPage(1);
+            if (ini && ini.startsWith('2025')) setAnoDreMensal(2025);
+            else if (ini && ini.startsWith('2026')) setAnoDreMensal(2026);
           }}
           onResetFilters={handleResetFilters}
           loading={loading}
@@ -378,11 +433,12 @@ export default function App() {
         {/* 3. 4 Cards de Métricas / KPIs */}
         <KpiCards kpis={kpis} regime={regime} />
 
-        {/* 4. Barra de Navegação de Módulos / Abas */}
-        <div className="flex items-center gap-2 mb-4 bg-slate-200/70 p-1 rounded-xl w-fit">
+        {/* 4. Barra de Navegação de Módulos / Abas (Inclui DRE Mês a Mês) */}
+        <div className="flex items-center gap-1.5 mb-4 bg-slate-200/70 p-1 rounded-xl w-fit flex-wrap">
           <button
+            type="button"
             onClick={() => setMainTab('dre')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               mainTab === 'dre'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -392,8 +448,24 @@ export default function App() {
             <span>Demonstrativo DRE</span>
           </button>
           <button
+            type="button"
+            onClick={() => {
+              setMainTab('dre_mensal');
+              if (!dreMensalData) loadDreMensal();
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              mainTab === 'dre_mensal'
+                ? 'bg-white text-emerald-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4 text-emerald-600" />
+            <span>DRE Mês a Mês</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setMainTab('graficos')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               mainTab === 'graficos'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -403,8 +475,9 @@ export default function App() {
             <span>Tendência &amp; Gráficos</span>
           </button>
           <button
+            type="button"
             onClick={() => setMainTab('lancamentos')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               mainTab === 'lancamentos'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -425,6 +498,20 @@ export default function App() {
         {/* 5. Conteúdo da Aba Selecionada */}
         {mainTab === 'dre' && (
           <DreTable dreData={dreData} regime={regime} />
+        )}
+
+        {mainTab === 'dre_mensal' && (
+          <DreMensalTable
+            dreMensalData={dreMensalData}
+            ano={anoDreMensal}
+            onChangeAno={(novoAno) => {
+              setAnoDreMensal(novoAno);
+              loadDreMensal(novoAno);
+            }}
+            regime={regime}
+            loading={loadingDreMensal}
+            onExportExcel={handleExportDreMensalExcel}
+          />
         )}
 
         {mainTab === 'graficos' && (
