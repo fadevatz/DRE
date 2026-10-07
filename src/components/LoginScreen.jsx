@@ -76,9 +76,6 @@ export default function LoginScreen({ onLoginSuccess }) {
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight leading-snug">
             Bem vindo ao portal de Ferramentas da Drogaria SC
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-2 font-medium">
-            Painel Financeiro &amp; DRE Contábil
-          </p>
         </div>
 
         {/* Mensagem de Erro */}
@@ -170,3 +167,4 @@ export default function LoginScreen({ onLoginSuccess }) {
     </div>
   );
 }
+
